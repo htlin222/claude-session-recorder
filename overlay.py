@@ -181,23 +181,35 @@ def _dur(path):
          "-of", "csv=p=0", path], capture_output=True, text=True).stdout)
 
 
-def transitions(core, bounds):
-    """Split `core` at scene boundaries, freeze-hold each scene's end by HOLD,
-    then crossfade (XF) into the next. Returns (out, scene_starts) where
-    scene_starts[i] is scene i's content start in the new timeline."""
-    n = len(bounds) - 1
+def transitions_av(vid, voice, vb, ab, delays):
+    """Assemble per-scene clips, freeze-hold + crossfade between them.
+
+    Video is split at the visual clears (vb); audio is split at the *sentence*
+    boundaries (ab) — so the narration is NEVER cut mid-sentence. Each scene's
+    narration is re-anchored to that scene's start (delays[i]), so video, audio
+    and panel all line up at every scene boundary. Returns (out, scene_starts)."""
+    n = len(vb) - 1
     pad = HOLD + XF
     segpaths, durs = [], []
     for i in range(n):
+        L = vb[i+1] - vb[i]
+        target = L + (pad if i < n - 1 else 0.0)
+        dms = int(delays[i] * 1000)
         seg = f"{DEMO}/_seg{i}.mp4"
-        cmd = [FF, "-y", "-ss", f"{bounds[i]:.3f}", "-to", f"{bounds[i+1]:.3f}",
-               "-i", core]
-        if i < n - 1:                                  # freeze + silence at end
-            cmd += ["-vf", f"tpad=stop_duration={pad}:stop_mode=clone",
-                    "-af", f"apad=pad_dur={pad}"]
-        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
-                "-c:a", "aac", "-b:a", "160k", seg]
-        subprocess.run(cmd, check=True, capture_output=True)
+        fc = [f"[1:a]adelay={dms}|{dms},apad=whole_dur={target:.3f},"
+              f"atrim=end={target:.3f}[a]"]
+        if i < n - 1:
+            fc.append(f"[0:v]tpad=stop_duration={pad}:stop_mode=clone[v]")
+            vmap = "[v]"
+        else:
+            vmap = "0:v"
+        subprocess.run(
+            [FF, "-y", "-ss", f"{vb[i]:.3f}", "-to", f"{vb[i+1]:.3f}", "-i", vid,
+             "-ss", f"{ab[i]:.3f}", "-to", f"{ab[i+1]:.3f}", "-i", voice,
+             "-filter_complex", ";".join(fc), "-map", vmap, "-map", "[a]",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
+             "-c:a", "aac", "-b:a", "160k", seg],
+            check=True, capture_output=True)
         segpaths.append(seg); durs.append(_dur(seg))
     cmd = [FF, "-y"]
     for p in segpaths:
@@ -244,6 +256,24 @@ def remap_srt(src, dst, bounds, S, off):
     open(dst, "w", encoding="utf-8").write("\n\n".join(out) + "\n")
 
 
+def build_subs(cues, ab, S, delays, initial, intro, dst):
+    """Place each cue (voice-timeline) on the transitioned timeline: scene i's
+    narration starts at S[i] + delays[i], so a cue at voice-time vt lands there
+    + (vt - ab[i]). Subtitles thus follow the re-anchored per-scene audio."""
+    def fmt(s):
+        h = int(s//3600); s -= h*3600; m = int(s//60); s -= m*60
+        return f"{h:02d}:{m:02d}:{int(s):02d},{int(round((s-int(s))*1000)):03d}"
+
+    def tt(vt):
+        i = max(j for j in range(len(ab)-1) if ab[j] <= vt)
+        i = min(i, len(S)-1)
+        return S[i] + delays[i] + (vt - ab[i]) + intro
+    out = []
+    for n, (a, b, txt) in enumerate(cues, start=1):
+        out.append(f"{n}\n{fmt(tt(a))} --> {fmt(tt(b))}\n{txt}")
+    open(dst, "w", encoding="utf-8").write("\n\n".join(out) + "\n")
+
+
 def _save(img, path):
     img.save(path); return path
 
@@ -251,9 +281,7 @@ def _save(img, path):
 def main():
     os.makedirs(PDIR, exist_ok=True)
     tl = json.load(open(f"{DEMO}/timeline.json", encoding="utf-8"))
-    total = float(subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "csv=p=0", AV], capture_output=True, text=True).stdout)
+    total = _dur(f"{DEMO}/rsync-demo.mp4")
     scale = total / tl["predicted_total"]
     print(f"total={total:.1f}s scale={scale:.3f}, CPL={CPL}")
 
@@ -295,26 +323,35 @@ def main():
     segs = [(p, d) for p, d in segs if d > 0.001]
     concat_video(segs, f"{DEMO}/_panel.mp4")
 
-    # pass 1 — pad terminal to 1920 + overlay the panel (still core timeline)
-    core = f"{DEMO}/_core.mp4"
-    subprocess.run([FF, "-y", "-i", AV, "-i", f"{DEMO}/_panel.mp4",
-                    "-filter_complex",
+    # pass 1 — pad terminal to 1920 + overlay the panel (VIDEO only; audio is
+    # re-attached per scene in transitions_av so it never gets cut mid-sentence)
+    vid = f"{DEMO}/_vid.mp4"
+    subprocess.run([FF, "-y", "-i", f"{DEMO}/rsync-demo.mp4",
+                    "-i", f"{DEMO}/_panel.mp4", "-filter_complex",
                     f"[0:v]pad={CW}:{H}:0:0:color=0x181825[bg];"
-                    f"[bg][1:v]overlay={TERM_W}:0[v]",
-                    "-map", "[v]", "-map", "0:a", "-c:v", "libx264",
-                    "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "copy", core],
-                   check=True, capture_output=True)
+                    f"[bg][1:v]overlay={TERM_W}:0[v]", "-map", "[v]",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
+                    "-an", vid], check=True, capture_output=True)
 
-    # pass 2 — per-scene 1s freeze-hold + crossfade between scenes (needs the
-    # detected clear boundaries; skip if detection didn't line up).
+    INITIAL = tl["anchor"]
     if synced:
-        bounds = [0.0] + clears + [_dur(core)]
-        src, S = transitions(core, bounds)
-        print(f"transitions: {len(bounds)-1} scenes, {HOLD}s hold + {XF}s xfade")
-    else:
-        bounds, S, src = None, None, core
+        # video splits at the visual clears; audio splits at sentence ends
+        vb = [0.0] + clears + [total]
+        ab = [0.0] + [panels[i]["banner"] - INITIAL for i in range(1, len(panels))] \
+            + [tl["narration_dur"]]
+        delays = [INITIAL] + [0.0] * (len(panels) - 1)   # scene1 has lead idle
+        src, S = transitions_av(vid, f"{DEMO}/audio/voice.mp3", vb, ab, delays)
+        print(f"transitions: {len(panels)} scenes, {HOLD}s hold + {XF}s xfade")
+    else:                                                # fallback: no transitions
+        d_ms = int(INTRO * 1000)
+        subprocess.run([FF, "-y", "-i", vid, "-i", f"{DEMO}/audio/voice.mp3",
+                        "-filter_complex", f"[1:a]adelay={int(INITIAL*1000)}|"
+                        f"{int(INITIAL*1000)}[a]", "-map", "0:v", "-map", "[a]",
+                        "-c:v", "copy", "-c:a", "aac", f"{DEMO}/_core.mp4"],
+                       check=True, capture_output=True)
+        src, S, ab, delays = f"{DEMO}/_core.mp4", None, None, None
 
-    # pass 3 — dissolve-in intro from pure bg + matching audio offset
+    # pass 2 — dissolve-in intro from pure bg + matching audio offset
     d_ms = int(INTRO * 1000)
     subprocess.run([FF, "-y", "-i", src, "-filter_complex",
                     f"[0:v]tpad=start_duration={INTRO}:start_mode=add:"
@@ -322,13 +359,12 @@ def main():
                     f"color=0x181825[v];[0:a]adelay={d_ms}|{d_ms}[a]",
                     "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
                     "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "aac",
-                    "-b:a", "160k", FINAL],
-                   check=True, capture_output=True)
+                    "-b:a", "160k", FINAL], check=True, capture_output=True)
 
-    # sidecar subtitles (NOT burned in), remapped through the new timeline
+    # sidecar subtitles (NOT burned in), built on the new per-scene timeline
     dst = f"{DEMO}/rsync-demo-final.srt"
     if synced:
-        remap_srt(f"{DEMO}/subs.srt", dst, bounds, S, INTRO)
+        build_subs(tl["cues"], ab, S, delays, INITIAL, INTRO, dst)
     else:
         shift_srt(f"{DEMO}/subs.srt", dst, INTRO)
     print(f"wrote {FINAL} (+ sidecar, intro offset {INTRO}s)")
