@@ -45,6 +45,8 @@ INTRO = 0.6           # dissolve-in: hold pure bg this long, then fade
 FADE = 0.7            # fade-in duration
 HOLD = 1.0            # freeze-hold at the end of each scene before transition
 XF = 0.5              # crossfade duration between scenes
+SAFETY = 0.25         # end each scene's video this much BEFORE the clear, so the
+                      # freeze-hold grabs the last output frame, not the blank
 INNER = PANEL_W - 2 * PAD
 _d = ImageDraw.Draw(Image.new("RGBA", (4, 4)))
 CMD_F = ImageFont.truetype(MONO, CMD_SIZE)
@@ -192,7 +194,10 @@ def transitions_av(vid, voice, vb, ab, delays):
     pad = HOLD + XF
     segpaths, durs = [], []
     for i in range(n):
-        L = vb[i+1] - vb[i]
+        # end the video a hair BEFORE the clear (Hide makes content->blank an
+        # instant jump cut; without this margin the freeze grabs the blank frame)
+        vend = vb[i+1] - (SAFETY if i < n - 1 else 0.0)
+        L = vend - vb[i]
         target = L + (pad if i < n - 1 else 0.0)
         dms = int(delays[i] * 1000)
         seg = f"{DEMO}/_seg{i}.mp4"
@@ -204,7 +209,7 @@ def transitions_av(vid, voice, vb, ab, delays):
         else:
             vmap = "0:v"
         subprocess.run(
-            [FF, "-y", "-ss", f"{vb[i]:.3f}", "-to", f"{vb[i+1]:.3f}", "-i", vid,
+            [FF, "-y", "-ss", f"{vb[i]:.3f}", "-to", f"{vend:.3f}", "-i", vid,
              "-ss", f"{ab[i]:.3f}", "-to", f"{ab[i+1]:.3f}", "-i", voice,
              "-filter_complex", ";".join(fc), "-map", vmap, "-map", "[a]",
              "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
