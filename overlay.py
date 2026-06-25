@@ -201,16 +201,17 @@ def transitions_av(vid, voice, vb, ab, delays):
         # instant jump cut; without this margin the freeze grabs the blank frame)
         vend = vb[i+1] - (SAFETY if i < n - 1 else 0.0)
         L = vend - vb[i]
-        target = L + (pad if i < n - 1 else 0.0)
+        A = ab[i+1] - ab[i]                            # narration length
+        # last scene: hold long enough for the narration to FINISH, then leave a
+        # HOLD+FADEOUT silent tail so the closing fade never cuts the voice.
+        end_pad = pad if i < n - 1 else max(0.0, A - L) + HOLD + FADEOUT
+        target = L + end_pad
         dms = int(delays[i] * 1000)
         seg = f"{DEMO}/_seg{i}.mp4"
         fc = [f"[1:a]adelay={dms}|{dms},apad=whole_dur={target:.3f},"
-              f"atrim=end={target:.3f}[a]"]
-        if i < n - 1:
-            fc.append(f"[0:v]tpad=stop_duration={pad}:stop_mode=clone[v]")
-            vmap = "[v]"
-        else:
-            vmap = "0:v"
+              f"atrim=end={target:.3f}[a]",
+              f"[0:v]tpad=stop_duration={end_pad:.3f}:stop_mode=clone[v]"]
+        vmap = "[v]"
         subprocess.run(
             [FF, "-y", "-ss", f"{vb[i]:.3f}", "-to", f"{vend:.3f}", "-i", vid,
              "-ss", f"{ab[i]:.3f}", "-to", f"{ab[i+1]:.3f}", "-i", voice,
