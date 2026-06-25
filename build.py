@@ -18,7 +18,11 @@ AUDIO = f"{DEMO}/audio"
 VOICE = "zh-TW-HsiaoChenNeural"
 RATE = "+0%"
 
-TS = 0.045          # TypingSpeed (s/char) — must match the tape
+TS = 0.024          # calibrated to VHS's ACTUAL per-char typing (measured:
+                    # 252 chars took ~6.1s -> 24.4ms/char, even though Set is
+                    # 45ms). Matching it makes the predicted clock track the
+                    # real video at every point, so panel reveals are accurate
+                    # straight from timeline.json — no linear-scale fudge.
 TOKEN_STEP = 0.6    # deliberate pause before each hero token (smoke-test feel)
 ENTER = 0.0
 INITIAL = 1.0
@@ -156,9 +160,13 @@ def main():
         "Set Shell zsh",
         "Set FontSize 26", "Set Width 1200", "Set Height 1080",
         'Set Theme "Catppuccin Mocha"',
-        f"Set TypingSpeed {int(TS*1000)}ms", "Set Padding 28", "",
-        "Hide", 'Type "setopt interactive_comments"', "Enter", "Sleep 300ms",
-        "Show", "",
+        # keep Set at 45ms (the config measured to yield ~24ms/char real); TS
+        # models that real rate, so don't derive this from TS.
+        "Set TypingSpeed 45ms", "Set Padding 28", "",
+        # enable `#` comments AND clear, all hidden, so t=0 opens on a clean
+        # prompt (no leftover `setopt ...` line visible at the start).
+        "Hide", 'Type "setopt interactive_comments"', "Enter",
+        'Type "clear"', "Enter", "Sleep 200ms", "Show", "",
     ]
     vt = 0.0
 
@@ -197,21 +205,39 @@ def main():
             sleep_to(INITIAL + cs)
             is_hero = cur is not None and cur["hero"] == cmd and cur_toks
             if is_hero:
-                # locate tokens, then type token by token at a deliberate pace
                 pos, spec = 0, []
                 for sub, ann, role in cur_toks:
                     idx = cmd.find(sub, pos); end = idx + len(sub); pos = end
                     spec.append((idx, end, sub, ann, role))
+                # Type each token so it lands *when the voice names that flag* —
+                # spread across the explain sentence, not clustered at the start.
+                # Find where the flag is spoken (its char position in the
+                # sentence) and map that to a time inside the cue.
+                text = cues[si][2]; L = max(1, len(text)); dur = ce - cs
+                n = len(spec)
+
+                def vfrac(sub, role, i):
+                    for key in (sub, sub.lstrip("-"), sub.split("=")[0].lstrip("-")):
+                        if key and key in text:
+                            return text.index(key) / L
+                    if role == "path" and "A" in text:
+                        return text.index("A") / L
+                    return (i + 1) / (n + 1)            # even-spread fallback
+
+                vrel, prevv = [], 0.0
+                for i, (idx, end, sub, ann, role) in enumerate(spec):
+                    v = max(prevv + 0.4, vfrac(sub, role, i) * dur)
+                    v = min(v, dur - 0.2)               # leave a beat before <CR>
+                    vrel.append(v); prevv = v
                 prefix = cmd[:spec[0][0]]
                 tape.append(f'Type "{prefix}"')
                 vt += len(prefix) * TS
                 prev = spec[0][0]
                 cur["cmd"] = cmd
                 cur["cmd_start"] = round(INITIAL + cs, 3)
-                for idx, end, sub, ann, role in spec:
-                    tape.append(f"Sleep {TOKEN_STEP}s")      # deliberate beat
-                    vt += TOKEN_STEP
+                for (idx, end, sub, ann, role), v in zip(spec, vrel):
                     chunk = cmd[prev:end]
+                    sleep_to(INITIAL + cs + v - len(chunk) * TS)  # land at voice
                     tape.append(f'Type "{chunk}"')
                     vt += len(chunk) * TS
                     prev = end

@@ -30,10 +30,17 @@ TEXT = (205, 214, 244)
 HL = (49, 50, 68)
 ROLE = {"ord": (166, 227, 161), "star": (250, 179, 135), "path": (203, 166, 247)}
 PAD = 42
-CMD_Y = 168
+CMD_Y = 172
 CMD_SIZE = 27
-LINE_H = 40
+LINE_H = 54           # roomy: tall padded token boxes still clear the next line
 ROW_H = 128
+TOK_PADX = 7          # token highlight box padding (more breathing room)
+TOK_PADT = 9
+TOK_PADB = 14
+PANEL_LEAD = 0.15     # shift the whole panel a hair earlier so it keeps pace
+                      # with the terminal (which switches scenes a touch faster)
+INTRO = 0.6           # dissolve-in: hold pure bg this long, then fade
+FADE = 0.7            # fade-in duration
 INNER = PANEL_W - 2 * PAD
 _d = ImageDraw.Draw(Image.new("RGBA", (4, 4)))
 CMD_F = ImageFont.truetype(MONO, CMD_SIZE)
@@ -74,19 +81,32 @@ def char_xy(lines, k):
     return len(lines) - 1, len(lines[-1][1])
 
 
-def panel_img(p, k):
+def panel_img(p, k, next_key=None):
     cjk_b = ImageFont.truetype(CJK, 29)
     cjk = ImageFont.truetype(CJK, 26)
     lblf = ImageFont.truetype(MONO, 27)
     img = Image.new("RGB", (PANEL_W, H), BG)
     d = ImageDraw.Draw(img)
     d.line([(0, 0), (0, H)], fill=ROLE["path"], width=3)
+    # subtle "next up" preview at the bottom (65% opacity, low saturation)
+    if next_key:
+        muted = (112, 116, 128)
+        nf_l = ImageFont.truetype(CJK, 21)
+        nf_t = ImageFont.truetype(CJK, 27)
+        yb = H - 124
+        d.line([(PAD, yb), (PANEL_W - PAD, yb)], fill=(52, 54, 66), width=1)
+        d.text((PAD, yb + 18), "下一個任務", font=nf_l, fill=muted)
+        nt = next_key
+        while d.textlength(nt + "…", font=nf_t) > INNER and len(nt) > 4:
+            nt = nt[:-1]
+        if nt != next_key:
+            nt += "…"
+        d.text((PAD, yb + 54), nt, font=nf_t, fill=muted)
     if p is not None:
         klines = wrap_words(p["key"], cjk_b, INNER - 44)
-        d.rounded_rectangle([PAD, 40, PANEL_W - PAD, 48 + len(klines)*38 + 14],
-                            radius=14, fill=HL)
-        d.line([(PAD, 40), (PAD, 48 + len(klines)*38 + 14)], fill=ROLE["star"],
-               width=5)
+        bot = 48 + len(klines) * 38 + 14
+        d.rectangle([PAD, 40, PANEL_W - PAD, bot], fill=HL)   # square, no radius
+        d.line([(PAD, 40), (PAD, bot)], fill=ROLE["star"], width=5)
         for li, ln in enumerate(klines):
             d.text((PAD + 22, 56 + li * 38), ln, font=cjk_b, fill=TEXT)
     if p is None or not p.get("cmd"):
@@ -94,23 +114,22 @@ def panel_img(p, k):
     cmd = p["cmd"]
     lines = wrap_cmd(cmd)
     toks = p["tokens"][:k]
-    # highlight revealed tokens (line-aware)
+    # highlight revealed tokens (line-aware). Extend the box to the next
+    # whitespace so it wraps the WHOLE argument (e.g. --exclude='*.log'),
+    # never cutting in the middle of a token.
     for t in toks:
+        ext_ce = t["ce"]
+        while ext_ce < len(cmd) and cmd[ext_ce] != " ":
+            ext_ce += 1
         li, col = char_xy(lines, t["cs"])
-        _, col2 = char_xy(lines, t["ce"] - 1)
+        _, col2 = char_xy(lines, ext_ce - 1)
         y = CMD_Y + li * LINE_H
-        d.rounded_rectangle([PAD + col*CHAR_W - 3, y - 4,
-                             PAD + (col2 + 1)*CHAR_W + 2, y + CMD_SIZE + 8],
-                            radius=6, fill=HL)
+        d.rounded_rectangle([PAD + col*CHAR_W - TOK_PADX, y - TOK_PADT,
+                             PAD + (col2 + 1)*CHAR_W + TOK_PADX,
+                             y + CMD_SIZE + TOK_PADB],
+                            radius=6, fill=HL, outline=ROLE[t["role"]], width=2)
     for li, (start, txt) in enumerate(lines):
         d.text((PAD, CMD_Y + li * LINE_H), txt, font=CMD_F, fill=TEXT)
-    # short stubs under revealed tokens (line-aware)
-    for t in toks:
-        li, col = char_xy(lines, t["cs"])
-        _, col2 = char_xy(lines, t["ce"] - 1)
-        tcx = PAD + (col + col2 + 1) / 2 * CHAR_W
-        ytop = CMD_Y + li * LINE_H + CMD_SIZE + 8
-        d.line([(tcx, ytop), (tcx, ytop + 14)], fill=ROLE[t["role"]], width=3)
     # annotation rows below the (possibly 2-line) command
     row_y0 = CMD_Y + len(lines) * LINE_H + 40
     for i, t in enumerate(toks):
@@ -148,34 +167,74 @@ def main():
     scale = total / tl["predicted_total"]
     print(f"total={total:.1f}s scale={scale:.3f}, CPL={CPL}")
 
+    # panel reveal times come straight from the (TS-calibrated) timeline, so
+    # they track the real video per-token; JCUT pulls each token reveal a hair
+    # early so it never feels like it lags the typing.
+    def at(sec):
+        return max(0.0, sec * scale - PANEL_LEAD)
+
+    panels = tl["panels"]
     blank = _save(panel_img(None, 0), f"{PDIR}/blank.png")
     states = [(0.0, blank)]
-    for pi, p in enumerate(tl["panels"]):
-        states.append((p["banner"] * scale, _save(panel_img(p, 0),
-                                                   f"{PDIR}/p{pi}_b.png")))
+    for pi, p in enumerate(panels):
+        nk = panels[pi + 1]["key"] if pi + 1 < len(panels) else None
+        states.append((at(p["banner"]), _save(panel_img(p, 0, nk),
+                                              f"{PDIR}/p{pi}_b.png")))
         if p["hero"]:
-            states.append((p["cmd_start"] * scale,
-                           _save(panel_img(p, 0), f"{PDIR}/p{pi}_c.png")))
+            states.append((at(p["cmd_start"]),
+                           _save(panel_img(p, 0, nk), f"{PDIR}/p{pi}_c.png")))
             for ki, t in enumerate(p["tokens"], start=1):
-                states.append((t["reveal"] * scale,
-                               _save(panel_img(p, ki), f"{PDIR}/p{pi}_{ki}.png")))
+                states.append((at(t["reveal"]),
+                               _save(panel_img(p, ki, nk), f"{PDIR}/p{pi}_{ki}.png")))
     states.sort(key=lambda s: s[0])
     segs = [(png, (states[i+1][0] if i+1 < len(states) else total) - t0)
             for i, (t0, png) in enumerate(states)]
     segs = [(p, d) for p, d in segs if d > 0.001]
     concat_video(segs, f"{DEMO}/_panel.mp4")
 
+    # pass 1 — pad terminal to 1920 + overlay the panel (still core timeline)
+    core = f"{DEMO}/_core.mp4"
     subprocess.run([FF, "-y", "-i", AV, "-i", f"{DEMO}/_panel.mp4",
                     "-filter_complex",
                     f"[0:v]pad={CW}:{H}:0:0:color=0x181825[bg];"
                     f"[bg][1:v]overlay={TERM_W}:0[v]",
                     "-map", "[v]", "-map", "0:a", "-c:v", "libx264",
-                    "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "copy", FINAL],
+                    "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "copy", core],
                    check=True, capture_output=True)
-    # subtitles as a sidecar (NOT burned in)
-    import shutil
-    shutil.copy(f"{DEMO}/subs.srt", f"{DEMO}/rsync-demo-final.srt")
-    print(f"wrote {FINAL} (+ sidecar rsync-demo-final.srt)")
+
+    # pass 2 — dissolve-in intro: hold pure bg, fade the prompt+panel in from
+    # that same colour (hides the hidden setup frame), and offset the audio by
+    # the same amount so it stays in sync.
+    d_ms = int(INTRO * 1000)
+    subprocess.run([FF, "-y", "-i", core, "-filter_complex",
+                    f"[0:v]tpad=start_duration={INTRO}:start_mode=add:"
+                    f"color=0x181825,fade=t=in:st={INTRO}:d={FADE}:"
+                    f"color=0x181825[v];[0:a]adelay={d_ms}|{d_ms}[a]",
+                    "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "aac",
+                    "-b:a", "160k", FINAL],
+                   check=True, capture_output=True)
+
+    # sidecar subtitles, shifted by the intro offset (NOT burned in)
+    shift_srt(f"{DEMO}/subs.srt", f"{DEMO}/rsync-demo-final.srt", INTRO)
+    print(f"wrote {FINAL} (+ sidecar, intro offset {INTRO}s)")
+
+
+def shift_srt(src, dst, off):
+    def fmt(s):
+        h = int(s // 3600); s -= h*3600; m = int(s // 60); s -= m*60
+        return f"{h:02d}:{m:02d}:{int(s):02d},{int(round((s-int(s))*1000)):03d}"
+    out = []
+    for blk in open(src, encoding="utf-8").read().split("\n\n"):
+        ls = blk.splitlines()
+        if len(ls) >= 2 and "-->" in ls[1]:
+            a, b = ls[1].split(" --> ")
+            def p(t):
+                h, m, r = t.split(":"); s, ms = r.split(",")
+                return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
+            ls[1] = f"{fmt(p(a)+off)} --> {fmt(p(b)+off)}"
+            out.append("\n".join(ls))
+    open(dst, "w", encoding="utf-8").write("\n\n".join(out) + "\n")
 
 
 if __name__ == "__main__":

@@ -163,7 +163,7 @@
           "role": "ord",
           "cs": 6,
           "ce": 8,
-          "reveal": 25.322
+          "reveal": 24.928
         },
         {
           "label": "-v",
@@ -171,7 +171,7 @@
           "role": "ord",
           "cs": 9,
           "ce": 11,
-          "reveal": 26.057
+          "reveal": 26.626
         },
         {
           "label": "-n",
@@ -179,7 +179,7 @@
           "role": "star",
           "cs": 12,
           "ce": 14,
-          "reveal": 26.792
+          "reveal": 29.457
         },
         {
           "label": "A/ B/",
@@ -187,7 +187,7 @@
           "role": "path",
           "cs": 15,
           "ce": 20,
-          "reveal": 27.662
+          "reveal": 30.777
         }
       ],
       "show_to": 38.675
@@ -205,7 +205,7 @@
           "role": "star",
           "cs": 6,
           "ce": 8,
-          "reveal": 43.122
+          "reveal": 42.894
         },
         {
           "label": "-v",
@@ -213,7 +213,7 @@
           "role": "ord",
           "cs": 9,
           "ce": 11,
-          "reveal": 43.857
+          "reveal": 44.907
         },
         {
           "label": "A/ B/",
@@ -221,7 +221,7 @@
           "role": "path",
           "cs": 12,
           "ce": 17,
-          "reveal": 44.727
+          "reveal": 46.737
         }
       ],
       "show_to": 56.1
@@ -239,7 +239,7 @@
           "role": "ord",
           "cs": 6,
           "ce": 8,
-          "reveal": 60.61
+          "reveal": 60.269
         },
         {
           "label": "-v",
@@ -247,7 +247,7 @@
           "role": "ord",
           "cs": 9,
           "ce": 11,
-          "reveal": 61.345
+          "reveal": 61.198
         },
         {
           "label": "--delete",
@@ -255,7 +255,7 @@
           "role": "star",
           "cs": 12,
           "ce": 20,
-          "reveal": 62.35
+          "reveal": 63.055
         },
         {
           "label": "A/ B/",
@@ -263,7 +263,7 @@
           "role": "path",
           "cs": 21,
           "ce": 26,
-          "reveal": 63.22
+          "reveal": 65.84
         }
       ],
       "show_to": 72.387
@@ -281,7 +281,7 @@
           "role": "ord",
           "cs": 6,
           "ce": 8,
-          "reveal": 78.11
+          "reveal": 77.55
         },
         {
           "label": "-v",
@@ -289,7 +289,7 @@
           "role": "ord",
           "cs": 9,
           "ce": 11,
-          "reveal": 78.845
+          "reveal": 78.241
         },
         {
           "label": "--exclude",
@@ -297,7 +297,7 @@
           "role": "star",
           "cs": 12,
           "ce": 21,
-          "reveal": 79.895
+          "reveal": 79.74
         },
         {
           "label": "A/ C/",
@@ -305,7 +305,7 @@
           "role": "path",
           "cs": 50,
           "ce": 55,
-          "reveal": 82.025
+          "reveal": 82.93
         }
       ],
       "show_to": 94.162
@@ -323,7 +323,7 @@
           "role": "ord",
           "cs": 6,
           "ce": 8,
-          "reveal": 104.335
+          "reveal": 103.6
         },
         {
           "label": "-z",
@@ -331,7 +331,7 @@
           "role": "star",
           "cs": 9,
           "ce": 11,
-          "reveal": 105.07
+          "reveal": 105.119
         },
         {
           "label": "--info=progress2",
@@ -339,7 +339,7 @@
           "role": "ord",
           "cs": 12,
           "ce": 28,
-          "reveal": 106.435
+          "reveal": 106.638
         },
         {
           "label": "A/ C/",
@@ -347,7 +347,7 @@
           "role": "path",
           "cs": 29,
           "ce": 34,
-          "reveal": 107.305
+          "reveal": 109.405
         }
       ],
       "show_to": 115.7
@@ -365,7 +365,7 @@
           "role": "ord",
           "cs": 6,
           "ce": 8,
-          "reveal": 121.197
+          "reveal": 120.64
         },
         {
           "label": "-v",
@@ -373,7 +373,7 @@
           "role": "ord",
           "cs": 9,
           "ce": 11,
-          "reveal": 121.932
+          "reveal": 121.851
         },
         {
           "label": "-i",
@@ -381,7 +381,7 @@
           "role": "star",
           "cs": 12,
           "ce": 14,
-          "reveal": 122.667
+          "reveal": 124.474
         },
         {
           "label": "A/ B/",
@@ -389,7 +389,7 @@
           "role": "path",
           "cs": 15,
           "ce": 20,
-          "reveal": 123.537
+          "reveal": 126.047
         }
       ],
       "show_to": 140.712

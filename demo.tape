@@ -11,7 +11,9 @@ Set Padding 28
 Hide
 Type "setopt interactive_comments"
 Enter
-Sleep 300ms
+Type "clear"
+Enter
+Sleep 200ms
 Show
 
 Sleep 1.0s
@@ -22,12 +24,12 @@ Sleep 120ms
 Show
 Sleep 5.08s
 Type "tree -a A"
-Sleep 2.92s
+Sleep 3.11s
 Enter
 Sleep 0.45s
 Sleep 3.91s
 Type "tree B"
-Sleep 1.84s
+Sleep 1.97s
 Enter
 Sleep 0.45s
 Sleep 4.12s
@@ -38,15 +40,15 @@ Sleep 120ms
 Show
 Sleep 3.91s
 Type "rsync "
-Sleep 0.6s
+Sleep 0.37s
 Type "-a"
-Sleep 0.6s
+Sleep 1.63s
 Type " -v"
-Sleep 0.6s
+Sleep 2.76s
 Type " -n"
-Sleep 0.6s
+Sleep 1.18s
 Type " A/ B/"
-Sleep 4.62s
+Sleep 1.51s
 Enter
 Sleep 0.45s
 Sleep 5.94s
@@ -57,17 +59,17 @@ Sleep 120ms
 Show
 Sleep 3.49s
 Type "rsync "
-Sleep 0.6s
+Sleep 0.54s
 Type "-a"
-Sleep 0.6s
+Sleep 1.94s
 Type " -v"
-Sleep 0.6s
+Sleep 1.69s
 Type " A/ B/"
-Sleep 4.02s
+Sleep 2.01s
 Enter
 Sleep 0.45s
 Type "tree B"
-Sleep 2.88s
+Sleep 3.01s
 Enter
 Sleep 0.45s
 Sleep 3.3s
@@ -78,15 +80,15 @@ Sleep 120ms
 Show
 Sleep 3.55s
 Type "rsync "
-Sleep 0.6s
+Sleep 0.43s
 Type "-a"
-Sleep 0.6s
+Sleep 0.86s
 Type " -v"
-Sleep 0.6s
+Sleep 1.64s
 Type " --delete"
-Sleep 0.6s
+Sleep 2.64s
 Type " A/ B/"
-Sleep 2.93s
+Sleep 0.31s
 Enter
 Sleep 0.45s
 Sleep 5.79s
@@ -97,19 +99,19 @@ Sleep 120ms
 Show
 Sleep 4.76s
 Type "rsync "
-Sleep 0.6s
+Sleep 0.21s
 Type "-a"
-Sleep 0.6s
+Sleep 0.62s
 Type " -v"
-Sleep 0.6s
+Sleep 1.26s
 Type " --exclude"
-Sleep 0.6s
+Sleep 2.37s
 Type "='*.log' --exclude='.cache/' A/ C/"
-Sleep 2.35s
+Sleep 1.44s
 Enter
 Sleep 0.45s
 Type "tree -a C"
-Sleep 4.08s
+Sleep 4.27s
 Enter
 Sleep 0.45s
 Sleep 4.4s
@@ -120,19 +122,19 @@ Sleep 120ms
 Show
 Sleep 5.25s
 Type "head -c 12000000 /dev/urandom > A/data/archive.bin"
-Sleep 1.26s
+Sleep 2.31s
 Enter
 Sleep 0.45s
 Type "rsync "
-Sleep 0.6s
+Sleep 0.03s
 Type "-a"
-Sleep 0.6s
+Sleep 1.45s
 Type " -z"
-Sleep 0.6s
+Sleep 1.11s
 Type " --info=progress2"
-Sleep 0.6s
+Sleep 2.62s
 Type " A/ C/"
-Sleep 3.72s
+Sleep 1.62s
 Enter
 Sleep 0.45s
 Sleep 4.22s
@@ -143,15 +145,15 @@ Sleep 120ms
 Show
 Sleep 4.54s
 Type "rsync "
-Sleep 0.6s
+Sleep 0.21s
 Type "-a"
-Sleep 0.6s
+Sleep 1.14s
 Type " -v"
-Sleep 0.6s
+Sleep 2.55s
 Type " -i"
-Sleep 0.6s
+Sleep 1.43s
 Type " A/ B/"
-Sleep 3.96s
+Sleep 1.45s
 Enter
 Sleep 0.45s
 Sleep 11.36s
