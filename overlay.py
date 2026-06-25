@@ -38,10 +38,13 @@ ROW_H = 128
 TOK_PADX = 7          # token highlight box padding (more breathing room)
 TOK_PADT = 9
 TOK_PADB = 14
-PANEL_LEAD = 0.04     # ~1 frame, so the panel switches on/just-before the
-                      # detected terminal clear (never a frame late)
+PANEL_LEAD = -0.08    # banner switches just AFTER the detected clear so it lands
+                      # in the NEXT segment — each scene's freeze-hold then holds
+                      # its own (matching) panel frame, not the next scene's
 INTRO = 0.6           # dissolve-in: hold pure bg this long, then fade
 FADE = 0.7            # fade-in duration
+HOLD = 1.0            # freeze-hold at the end of each scene before transition
+XF = 0.5              # crossfade duration between scenes
 INNER = PANEL_W - 2 * PAD
 _d = ImageDraw.Draw(Image.new("RGBA", (4, 4)))
 CMD_F = ImageFont.truetype(MONO, CMD_SIZE)
@@ -172,6 +175,75 @@ def detect_clears(video):
     return [i / fps for i in range(1, n) if empty[i] and not empty[i-1]]
 
 
+def _dur(path):
+    return float(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", path], capture_output=True, text=True).stdout)
+
+
+def transitions(core, bounds):
+    """Split `core` at scene boundaries, freeze-hold each scene's end by HOLD,
+    then crossfade (XF) into the next. Returns (out, scene_starts) where
+    scene_starts[i] is scene i's content start in the new timeline."""
+    n = len(bounds) - 1
+    pad = HOLD + XF
+    segpaths, durs = [], []
+    for i in range(n):
+        seg = f"{DEMO}/_seg{i}.mp4"
+        cmd = [FF, "-y", "-ss", f"{bounds[i]:.3f}", "-to", f"{bounds[i+1]:.3f}",
+               "-i", core]
+        if i < n - 1:                                  # freeze + silence at end
+            cmd += ["-vf", f"tpad=stop_duration={pad}:stop_mode=clone",
+                    "-af", f"apad=pad_dur={pad}"]
+        cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
+                "-c:a", "aac", "-b:a", "160k", seg]
+        subprocess.run(cmd, check=True, capture_output=True)
+        segpaths.append(seg); durs.append(_dur(seg))
+    cmd = [FF, "-y"]
+    for p in segpaths:
+        cmd += ["-i", p]
+    vf, af, pv, pa, cum = [], [], "[0:v]", "[0:a]", durs[0]
+    for k in range(1, n):
+        vo, ao = f"[v{k}]", f"[a{k}]"
+        vf.append(f"{pv}[{k}:v]xfade=transition=fade:duration={XF}:"
+                  f"offset={cum - XF:.3f}{vo}")
+        af.append(f"{pa}[{k}:a]acrossfade=d={XF}{ao}")
+        pv, pa, cum = vo, ao, cum + durs[k] - XF
+    out = f"{DEMO}/_trans.mp4"
+    subprocess.run(cmd + ["-filter_complex", ";".join(vf + af),
+                          "-map", pv, "-map", pa, "-c:v", "libx264",
+                          "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "aac",
+                          "-b:a", "160k", out], check=True, capture_output=True)
+    S = [0.0]
+    for i in range(1, n):
+        S.append(S[-1] + durs[i-1] - XF)
+    return out, S
+
+
+def remap_srt(src, dst, bounds, S, off):
+    """remap cue times from core timeline through the transition timeline."""
+    def fmt(s):
+        h = int(s//3600); s -= h*3600; m = int(s//60); s -= m*60
+        return f"{h:02d}:{m:02d}:{int(s):02d},{int(round((s-int(s))*1000)):03d}"
+
+    def mp(t):
+        i = max(j for j in range(len(bounds)-1) if bounds[j] <= t) \
+            if t >= bounds[0] else 0
+        i = min(i, len(S) - 1)
+        return S[i] + (t - bounds[i]) + off
+    out = []
+    for blk in open(src, encoding="utf-8").read().split("\n\n"):
+        ls = blk.splitlines()
+        if len(ls) >= 2 and "-->" in ls[1]:
+            a, b = ls[1].split(" --> ")
+            def p(t):
+                h, m, r = t.split(":"); s, ms = r.split(",")
+                return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
+            ls[1] = f"{fmt(mp(p(a)))} --> {fmt(mp(p(b)))}"
+            out.append("\n".join(ls))
+    open(dst, "w", encoding="utf-8").write("\n\n".join(out) + "\n")
+
+
 def _save(img, path):
     img.save(path); return path
 
@@ -193,7 +265,8 @@ def main():
     # banner switches on the exact frame the terminal clears. Within a scene,
     # token reveals keep their predicted offset (scaled) from the scene start.
     clears = detect_clears(f"{DEMO}/rsync-demo.mp4")
-    if len(clears) == len(panels) - 1:
+    synced = len(clears) == len(panels) - 1
+    if synced:
         anchors = [panels[0]["banner"] * scale] + clears
         print(f"clear-sync: detected {len(clears)} clears, anchored to terminal")
     else:
@@ -232,11 +305,18 @@ def main():
                     "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "copy", core],
                    check=True, capture_output=True)
 
-    # pass 2 — dissolve-in intro: hold pure bg, fade the prompt+panel in from
-    # that same colour (hides the hidden setup frame), and offset the audio by
-    # the same amount so it stays in sync.
+    # pass 2 — per-scene 1s freeze-hold + crossfade between scenes (needs the
+    # detected clear boundaries; skip if detection didn't line up).
+    if synced:
+        bounds = [0.0] + clears + [_dur(core)]
+        src, S = transitions(core, bounds)
+        print(f"transitions: {len(bounds)-1} scenes, {HOLD}s hold + {XF}s xfade")
+    else:
+        bounds, S, src = None, None, core
+
+    # pass 3 — dissolve-in intro from pure bg + matching audio offset
     d_ms = int(INTRO * 1000)
-    subprocess.run([FF, "-y", "-i", core, "-filter_complex",
+    subprocess.run([FF, "-y", "-i", src, "-filter_complex",
                     f"[0:v]tpad=start_duration={INTRO}:start_mode=add:"
                     f"color=0x181825,fade=t=in:st={INTRO}:d={FADE}:"
                     f"color=0x181825[v];[0:a]adelay={d_ms}|{d_ms}[a]",
@@ -245,8 +325,12 @@ def main():
                     "-b:a", "160k", FINAL],
                    check=True, capture_output=True)
 
-    # sidecar subtitles, shifted by the intro offset (NOT burned in)
-    shift_srt(f"{DEMO}/subs.srt", f"{DEMO}/rsync-demo-final.srt", INTRO)
+    # sidecar subtitles (NOT burned in), remapped through the new timeline
+    dst = f"{DEMO}/rsync-demo-final.srt"
+    if synced:
+        remap_srt(f"{DEMO}/subs.srt", dst, bounds, S, INTRO)
+    else:
+        shift_srt(f"{DEMO}/subs.srt", dst, INTRO)
     print(f"wrote {FINAL} (+ sidecar, intro offset {INTRO}s)")
 
 
