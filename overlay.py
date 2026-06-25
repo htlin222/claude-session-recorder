@@ -30,6 +30,9 @@ BG = (24, 24, 37)
 TEXT = (205, 214, 244)
 HL = (49, 50, 68)
 ROLE = {"ord": (166, 227, 161), "star": (250, 179, 135), "path": (203, 166, 247)}
+# distinct colour per token (by position) so no two tokens share a colour
+PALETTE = [(166, 227, 161), (137, 180, 250), (250, 179, 135),
+           (203, 166, 247), (148, 226, 213), (249, 226, 175)]
 PAD = 42
 CMD_Y = 172
 CMD_SIZE = 27
@@ -43,6 +46,7 @@ PANEL_LEAD = -0.08    # banner switches just AFTER the detected clear so it land
                       # its own (matching) panel frame, not the next scene's
 INTRO = 0.6           # dissolve-in: hold pure bg this long, then fade
 FADE = 0.7            # fade-in duration
+FADEOUT = 0.9         # fade the last clip out at the end
 HOLD = 1.0            # freeze-hold at the end of each scene before transition
 XF = 0.5              # crossfade duration between scenes
 SAFETY = 0.25         # end each scene's video this much BEFORE the clear, so the
@@ -123,25 +127,24 @@ def panel_img(p, k, next_key=None):
     # highlight revealed tokens (line-aware). Extend the box to the next
     # whitespace so it wraps the WHOLE argument (e.g. --exclude='*.log'),
     # never cutting in the middle of a token.
-    for t in toks:
+    for i, t in enumerate(toks):
         ext_ce = t["ce"]
         while ext_ce < len(cmd) and cmd[ext_ce] != " ":
             ext_ce += 1
         li, col = char_xy(lines, t["cs"])
         _, col2 = char_xy(lines, ext_ce - 1)
         y = CMD_Y + li * LINE_H
-        d.rounded_rectangle([PAD + col*CHAR_W - TOK_PADX, y - TOK_PADT,
-                             PAD + (col2 + 1)*CHAR_W + TOK_PADX,
-                             y + CMD_SIZE + TOK_PADB],
-                            radius=6, fill=HL, outline=ROLE[t["role"]], width=2)
+        d.rectangle([PAD + col*CHAR_W - TOK_PADX, y - TOK_PADT,
+                     PAD + (col2 + 1)*CHAR_W + TOK_PADX, y + CMD_SIZE + TOK_PADB],
+                    fill=HL, outline=PALETTE[i % len(PALETTE)], width=2)
     for li, (start, txt) in enumerate(lines):
         d.text((PAD, CMD_Y + li * LINE_H), txt, font=CMD_F, fill=TEXT)
     # annotation rows below the (possibly 2-line) command
     row_y0 = CMD_Y + len(lines) * LINE_H + 40
     for i, t in enumerate(toks):
-        col = ROLE[t["role"]]
+        col = PALETTE[i % len(PALETTE)]
         ry = row_y0 + i * ROW_H
-        d.rounded_rectangle([PAD, ry, PAD + 5, ry + 76], radius=2, fill=col)
+        d.rectangle([PAD, ry, PAD + 5, ry + 76], fill=col)
         d.text((PAD + 22, ry), t["label"], font=lblf, fill=col)
         for j, ln in enumerate(wrap_words(t["ann"], cjk, INNER - 26)):
             d.text((PAD + 22, ry + 42 + j * 34), ln, font=cjk, fill=TEXT)
@@ -356,12 +359,17 @@ def main():
                        check=True, capture_output=True)
         src, S, ab, delays = f"{DEMO}/_core.mp4", None, None, None
 
-    # pass 2 — dissolve-in intro from pure bg + matching audio offset
+    # pass 2 — dissolve-in intro from pure bg + matching audio offset, and
+    # fade the last clip out at the very end
     d_ms = int(INTRO * 1000)
+    fo = _dur(src) + INTRO - FADEOUT                  # fade-out start
     subprocess.run([FF, "-y", "-i", src, "-filter_complex",
                     f"[0:v]tpad=start_duration={INTRO}:start_mode=add:"
                     f"color=0x181825,fade=t=in:st={INTRO}:d={FADE}:"
-                    f"color=0x181825[v];[0:a]adelay={d_ms}|{d_ms}[a]",
+                    f"color=0x181825,fade=t=out:st={fo:.3f}:d={FADEOUT}:"
+                    f"color=0x181825[v];"
+                    f"[0:a]adelay={d_ms}|{d_ms},afade=t=out:st={fo:.3f}:"
+                    f"d={FADEOUT}[a]",
                     "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
                     "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "aac",
                     "-b:a", "160k", FINAL], check=True, capture_output=True)
