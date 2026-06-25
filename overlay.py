@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 DEMO = os.path.dirname(os.path.abspath(__file__))
@@ -37,8 +38,8 @@ ROW_H = 128
 TOK_PADX = 7          # token highlight box padding (more breathing room)
 TOK_PADT = 9
 TOK_PADB = 14
-PANEL_LEAD = 0.15     # shift the whole panel a hair earlier so it keeps pace
-                      # with the terminal (which switches scenes a touch faster)
+PANEL_LEAD = 0.04     # ~1 frame, so the panel switches on/just-before the
+                      # detected terminal clear (never a frame late)
 INTRO = 0.6           # dissolve-in: hold pure bg this long, then fade
 FADE = 0.7            # fade-in duration
 INNER = PANEL_W - 2 * PAD
@@ -154,6 +155,23 @@ def concat_video(segs, out):
                    check=True, capture_output=True)
 
 
+def detect_clears(video):
+    """Find the real frame-times where the terminal clears (content -> empty).
+    These are deterministic visual anchors: the panel banner is pinned to them
+    so left and right switch on the SAME frame (no predicted-clock residual)."""
+    sw, sh, fps = 200, 180, 12.5
+    raw = subprocess.run([FF, "-i", video, "-vf",
+                          f"scale={sw}:{sh},format=gray,fps={fps}",
+                          "-f", "rawvideo", "-"], capture_output=True).stdout
+    n = len(raw) // (sw * sh)
+    f = np.frombuffer(raw, np.uint8)[:n*sw*sh].reshape(n, sh, sw)
+    content = (f > 90).sum(axis=(1, 2)).astype(float)
+    base, hi = np.percentile(content, 5), np.percentile(content, 70)
+    thr = base + 0.30 * (hi - base)
+    empty = content < thr
+    return [i / fps for i in range(1, n) if empty[i] and not empty[i-1]]
+
+
 def _save(img, path):
     img.save(path); return path
 
@@ -170,21 +188,33 @@ def main():
     # panel reveal times come straight from the (TS-calibrated) timeline, so
     # they track the real video per-token; JCUT pulls each token reveal a hair
     # early so it never feels like it lags the typing.
-    def at(sec):
-        return max(0.0, sec * scale - PANEL_LEAD)
-
     panels = tl["panels"]
+    # Anchor each scene's panel to the REAL detected terminal clear, so the
+    # banner switches on the exact frame the terminal clears. Within a scene,
+    # token reveals keep their predicted offset (scaled) from the scene start.
+    clears = detect_clears(f"{DEMO}/rsync-demo.mp4")
+    if len(clears) == len(panels) - 1:
+        anchors = [panels[0]["banner"] * scale] + clears
+        print(f"clear-sync: detected {len(clears)} clears, anchored to terminal")
+    else:
+        anchors = [p["banner"] * scale for p in panels]
+        print(f"clear-sync: detected {len(clears)} != {len(panels)-1}, fallback")
+
+    def st(pi, sec):
+        return max(0.0, anchors[pi] + (sec - panels[pi]["banner"]) * scale
+                   - PANEL_LEAD)
+
     blank = _save(panel_img(None, 0), f"{PDIR}/blank.png")
     states = [(0.0, blank)]
     for pi, p in enumerate(panels):
         nk = panels[pi + 1]["key"] if pi + 1 < len(panels) else None
-        states.append((at(p["banner"]), _save(panel_img(p, 0, nk),
-                                              f"{PDIR}/p{pi}_b.png")))
+        states.append((st(pi, p["banner"]), _save(panel_img(p, 0, nk),
+                                                   f"{PDIR}/p{pi}_b.png")))
         if p["hero"]:
-            states.append((at(p["cmd_start"]),
+            states.append((st(pi, p["cmd_start"]),
                            _save(panel_img(p, 0, nk), f"{PDIR}/p{pi}_c.png")))
             for ki, t in enumerate(p["tokens"], start=1):
-                states.append((at(t["reveal"]),
+                states.append((st(pi, t["reveal"]),
                                _save(panel_img(p, ki, nk), f"{PDIR}/p{pi}_{ki}.png")))
     states.sort(key=lambda s: s[0])
     segs = [(png, (states[i+1][0] if i+1 < len(states) else total) - t0)
