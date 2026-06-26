@@ -1,4 +1,4 @@
-# clips — rsync teaching demo config. Edit these knobs, then re-run the pipeline
+# clip — rsync teaching demo config. Edit these knobs, then re-run the pipeline
 # (see CLAUDE.md). build.py and overlay.py read this file; missing keys fall
 # back to the defaults shown here.
 

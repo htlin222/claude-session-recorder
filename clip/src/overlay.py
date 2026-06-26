@@ -17,7 +17,7 @@ import tomllib
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clips/
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clip/
 DEMO = f"{ROOT}/intermediate"
 DIST = f"{ROOT}/dist"
 FINAL = f"{DIST}/rsync-demo-final.mp4"

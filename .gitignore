@@ -1,13 +1,13 @@
 # python venv (recreate: uv venv .venv && uv pip install pillow numpy)
-clips/.venv/
+clip/.venv/
 
 # regenerable working dirs + ffmpeg intermediates
-clips/intermediate/A/
-clips/intermediate/B/
-clips/intermediate/C/
-clips/intermediate/_*
-clips/intermediate/*.mp4.txt
-clips/intermediate/rsync-demo.mp4
+clip/intermediate/A/
+clip/intermediate/B/
+clip/intermediate/C/
+clip/intermediate/_*
+clip/intermediate/*.mp4.txt
+clip/intermediate/rsync-demo.mp4
 
 # misc
 .DS_Store

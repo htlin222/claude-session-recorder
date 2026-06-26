@@ -14,7 +14,7 @@ import os
 import subprocess
 import tomllib
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clips/
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clip/
 DEMO = f"{ROOT}/intermediate"
 AUDIO = f"{DEMO}/audio"
 CFG = tomllib.load(open(f"{ROOT}/config.toml", "rb"))
