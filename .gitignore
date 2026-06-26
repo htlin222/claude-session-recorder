@@ -32,3 +32,7 @@ clip/experimental/**/work/
 clip/experimental/nvim/out.mp4
 clip/experimental/nvim/code.py
 mdp-demo/
+
+# portable per-slug folders: scratch + vendored venv (regenerable)
+*/intermediate/
+engine/**/__pycache__/
