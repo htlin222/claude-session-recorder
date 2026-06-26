@@ -26,3 +26,9 @@ clip_rsync/
 *.srt
 *.html
 *.log
+
+# experimental prototype scratch (regenerate by running the prototype)
+clip/experimental/**/work/
+clip/experimental/nvim/out.mp4
+clip/experimental/nvim/code.py
+mdp-demo/
