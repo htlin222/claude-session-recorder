@@ -1,0 +1,580 @@
+{
+  "slug": "ssh",
+  "title": "ssh 教學 · 不連線也能學的本機金鑰與設定",
+  "predicted_total": 289.488,
+  "anchor": 1.0,
+  "mp3": "/Users/htlin/vhs-demo/ssh/intermediate/audio/ssh.mp3",
+  "narration_dur": 287.088,
+  "cues": [
+    [
+      0.1,
+      8.925,
+      "一講到 SSH，大家想到的多半是連線到遠端主機，但其實有一大半的功能，根本不需要網路。"
+    ],
+    [
+      8.875,
+      17.0,
+      "這支教學只碰本機、可重現、不連線的部分，全程不會動到你真正的 ~/.ssh。"
+    ],
+    [
+      17.0,
+      26.075,
+      "先講平台差異：這裡的 cat 是 BSD 版，所以示範一律改用 GNU 的 gcat，而在 Linux 上它就是原本的 cat。"
+    ],
+    [
+      26.075,
+      36.237,
+      "另外等一下 ssh -V 的後半，在 macOS 顯示的是 LibreSSL，在 Linux 通常會是 OpenSSL，這點先放在心上。"
+    ],
+    [
+      36.237,
+      45.35,
+      "第一步，只要加上 -V 這個旗標，ssh 就會印出版本字串然後立刻結束，完全不會嘗試連線。"
+    ],
+    [
+      45.35,
+      54.987,
+      "前半的 OpenSSH 版本號兩邊一致，後半的 LibreSSL 才是 macOS 特有，換到 Linux 上多半會變成 OpenSSL。"
+    ],
+    [
+      54.987,
+      59.425,
+      "有了版本資訊，接下來正式產生一對金鑰。"
+    ],
+    [
+      59.425,
+      67.125,
+      "我們用 -t ed25519 指定演算法，它是現代、短小又安全的橢圓曲線選擇。"
+    ],
+    [
+      67.125,
+      73.962,
+      "再用 -C 'me@host' 加上一段註解，方便日後辨認這把鑰匙到底是誰的。"
+    ],
+    [
+      73.962,
+      83.187,
+      "最後用 -f ./id_demo 指定檔名，並用 -N '' 設成空密碼，示範才能非互動地一次跑完。"
+    ],
+    [
+      83.187,
+      91.662,
+      "一口氣產生了兩個檔案：沒有密碼的私鑰 id_demo，以及與它配對的公鑰 id_demo.pub。"
+    ],
+    [
+      91.662,
+      96.562,
+      "先看那個沒有副檔名的檔，也就是私鑰 id_demo。"
+    ],
+    [
+      96.562,
+      101.125,
+      "用 gcat 把 id_demo 的內容直接印出來瞧瞧。"
+    ],
+    [
+      101.125,
+      109.125,
+      "開頭的 OPENSSH PRIVATE KEY 標記說明了它的身份，這把私鑰必須牢牢留在本機，絕對不能外流。"
+    ],
+    [
+      109.125,
+      114.5,
+      "接著看多了點 pub 的那個檔，也就是公鑰 id_demo.pub。"
+    ],
+    [
+      114.5,
+      119.287,
+      "一樣用 gcat 把 id_demo.pub 的單行內容印出來。"
+    ],
+    [
+      119.287,
+      128.262,
+      "公鑰只有一行，由演算法名稱、Base64 編碼和那段註解組成，可以放心貼到伺服器或 GitHub。"
+    ],
+    [
+      128.262,
+      136.612,
+      "萬一公鑰檔不小心被刪掉了，加上 -y 這個旗標，ssh-keygen 就會從私鑰導出對應的公鑰。"
+    ],
+    [
+      136.612,
+      141.512,
+      "再用 -f id_demo 指定要讀進來的那一把私鑰。"
+    ],
+    [
+      141.512,
+      149.737,
+      "印出來的這一行，和剛才的 id_demo.pub 一字不差，證明公鑰本來就藏在私鑰裡面。"
+    ],
+    [
+      149.737,
+      159.612,
+      "金鑰本身很長不好比對，加上 -l 並用 -f id_demo.pub 指定公鑰檔，ssh-keygen 就會算出它的指紋。"
+    ],
+    [
+      159.612,
+      167.637,
+      "輸出依序是位元數、SHA256 指紋、註解，以及括號裡的演算法 ED25519。"
+    ],
+    [
+      167.637,
+      174.5,
+      "新版預設用 SHA256 顯示指紋，但有些舊系統或文件還停留在 MD5。"
+    ],
+    [
+      174.5,
+      180.875,
+      "在 -l 之外再加上 -E md5，就能把指紋切換成舊式的格式。"
+    ],
+    [
+      180.875,
+      188.062,
+      "這次指紋變成一串以冒號分隔的十六進位，正是以前最常見到的那種樣子。"
+    ],
+    [
+      188.062,
+      197.762,
+      "指紋還能畫成圖，把旗標合併寫成 -lv，就是在算指紋的同時，再用 -v 把 randomart 一起印出來。"
+    ],
+    [
+      197.762,
+      205.037,
+      "這張由符號排成的方塊就是 randomart，同一把金鑰永遠會畫出一模一樣的圖案。"
+    ],
+    [
+      205.037,
+      212.425,
+      "每次都打一長串參數太累，先用 gcat 看看這個示範用的 config 設定檔長什麼樣子。"
+    ],
+    [
+      212.425,
+      221.137,
+      "檔案裡用 Host 區塊替一組連線參數取個短名，例如把 web 對應到真正的主機、使用者與連接埠。"
+    ],
+    [
+      221.137,
+      227.312,
+      "寫好 config 之後，怎麼確認 ssh 真的會照我們想的方式去解析它？"
+    ],
+    [
+      227.312,
+      235.587,
+      "用 -G 這個旗標，ssh 會針對某一台主機印出解析後的完整設定，而且全程不連線。"
+    ],
+    [
+      235.587,
+      242.825,
+      "後面接上主機別名 web，再用 -F ./config 指定要讀的就是手邊這個設定檔。"
+    ],
+    [
+      242.825,
+      250.087,
+      "輸出裡的 hostname、user、port 正是我們在 config 寫下的值，其餘則是系統的預設。"
+    ],
+    [
+      250.087,
+      260.575,
+      "最後這個會真的改寫檔案，請特別小心：伺服器換金鑰跳警告時，可以用 -R 把舊記錄從 known_hosts 裡移除。"
+    ],
+    [
+      260.575,
+      268.45,
+      "這裡刻意用 -f known_hosts 指向示範檔，所以完全不會碰到你真正家目錄裡的記錄。"
+    ],
+    [
+      268.45,
+      276.75,
+      "執行之後它會刪掉 oldserver 對應的那一整行，並貼心地把原本的內容備份成 known_hosts.old。"
+    ],
+    [
+      276.75,
+      287.025,
+      "從查版本、產生金鑰到讀 config、解析設定，這些不連線就能練的基本功，就是你日後順利連上遠端的底氣。"
+    ]
+  ],
+  "panels": [
+    {
+      "banner": 1.0,
+      "key": "ssh · 不連線也能學的金鑰與設定",
+      "hero": null,
+      "cmd": null,
+      "cmd_start": null,
+      "tokens": [],
+      "show_to": 37.237
+    },
+    {
+      "banner": 37.237,
+      "key": "ssh -V：查 OpenSSH 版本",
+      "hero": "ssh -V",
+      "cmd": "ssh -V",
+      "cmd_start": 37.237,
+      "tokens": [
+        {
+          "label": "ssh",
+          "ann": "SSH 用戶端本體",
+          "role": "path",
+          "cs": 0,
+          "ce": 3,
+          "reveal": 40.68
+        },
+        {
+          "label": "-V",
+          "ann": "印出版本字串後立刻結束",
+          "role": "star",
+          "cs": 4,
+          "ce": 6,
+          "reveal": 41.08
+        }
+      ],
+      "show_to": 55.987
+    },
+    {
+      "banner": 55.987,
+      "key": "ssh-keygen -t：產生 ed25519 金鑰對",
+      "hero": "ssh-keygen -t ed25519 -C 'me@host' -f ./id_demo -N ''",
+      "cmd": "ssh-keygen -t ed25519 -C 'me@host' -f ./id_demo -N ''",
+      "cmd_start": 74.962,
+      "tokens": [
+        {
+          "label": "ssh-keygen",
+          "ann": "產生與管理金鑰的工具",
+          "role": "path",
+          "cs": 0,
+          "ce": 10,
+          "reveal": 76.499
+        },
+        {
+          "label": "-t ed25519",
+          "ann": "選用 ed25519 演算法",
+          "role": "star",
+          "cs": 11,
+          "ce": 21,
+          "reveal": 78.037
+        },
+        {
+          "label": "-C 'me@host'",
+          "ann": "寫進公鑰的註解",
+          "role": "ord",
+          "cs": 22,
+          "ce": 34,
+          "reveal": 79.575
+        },
+        {
+          "label": "-f ./id_demo",
+          "ann": "指定輸出檔名",
+          "role": "ord",
+          "cs": 35,
+          "ce": 47,
+          "reveal": 79.975
+        },
+        {
+          "label": "-N ''",
+          "ann": "設成空密碼",
+          "role": "ord",
+          "cs": 48,
+          "ce": 53,
+          "reveal": 80.374
+        }
+      ],
+      "show_to": 92.662
+    },
+    {
+      "banner": 92.662,
+      "key": "私鑰 id_demo：絕對不能外流",
+      "hero": "gcat id_demo",
+      "cmd": "gcat id_demo",
+      "cmd_start": 97.562,
+      "tokens": [
+        {
+          "label": "gcat",
+          "ann": "把檔案內容印到畫面",
+          "role": "path",
+          "cs": 0,
+          "ce": 4,
+          "reveal": 97.962
+        },
+        {
+          "label": "id_demo",
+          "ann": "沒有副檔名的就是私鑰",
+          "role": "star",
+          "cs": 5,
+          "ce": 12,
+          "reveal": 99.029
+        }
+      ],
+      "show_to": 110.125
+    },
+    {
+      "banner": 110.125,
+      "key": "公鑰 id_demo.pub：可以公開分享",
+      "hero": "gcat id_demo.pub",
+      "cmd": "gcat id_demo.pub",
+      "cmd_start": 115.5,
+      "tokens": [
+        {
+          "label": "gcat",
+          "ann": "印出檔案內容",
+          "role": "path",
+          "cs": 0,
+          "ce": 4,
+          "reveal": 116.098
+        },
+        {
+          "label": "id_demo.pub",
+          "ann": "多了 .pub 的就是公鑰",
+          "role": "star",
+          "cs": 5,
+          "ce": 16,
+          "reveal": 117.146
+        }
+      ],
+      "show_to": 129.262
+    },
+    {
+      "banner": 129.262,
+      "key": "ssh-keygen -y：從私鑰推回公鑰",
+      "hero": "ssh-keygen -y -f id_demo",
+      "cmd": "ssh-keygen -y -f id_demo",
+      "cmd_start": 137.612,
+      "tokens": [
+        {
+          "label": "ssh-keygen",
+          "ann": "金鑰工具",
+          "role": "path",
+          "cs": 0,
+          "ce": 10,
+          "reveal": 138.837
+        },
+        {
+          "label": "-y",
+          "ann": "從私鑰重新導出公鑰",
+          "role": "star",
+          "cs": 11,
+          "ce": 13,
+          "reveal": 140.062
+        },
+        {
+          "label": "-f id_demo",
+          "ann": "指定要讀的私鑰",
+          "role": "ord",
+          "cs": 14,
+          "ce": 24,
+          "reveal": 140.462
+        }
+      ],
+      "show_to": 150.737
+    },
+    {
+      "banner": 150.737,
+      "key": "ssh-keygen -l：算金鑰指紋",
+      "hero": "ssh-keygen -l -f id_demo.pub",
+      "cmd": "ssh-keygen -l -f id_demo.pub",
+      "cmd_start": 150.737,
+      "tokens": [
+        {
+          "label": "ssh-keygen",
+          "ann": "金鑰工具",
+          "role": "path",
+          "cs": 0,
+          "ce": 10,
+          "reveal": 157.374
+        },
+        {
+          "label": "-l",
+          "ann": "計算金鑰的指紋",
+          "role": "star",
+          "cs": 11,
+          "ce": 13,
+          "reveal": 157.774
+        },
+        {
+          "label": "-f id_demo.pub",
+          "ann": "對哪個檔計算",
+          "role": "ord",
+          "cs": 14,
+          "ce": 28,
+          "reveal": 158.174
+        }
+      ],
+      "show_to": 168.637
+    },
+    {
+      "banner": 168.637,
+      "key": "-E md5：換成舊式指紋格式",
+      "hero": "ssh-keygen -l -E md5 -f id_demo.pub",
+      "cmd": "ssh-keygen -l -E md5 -f id_demo.pub",
+      "cmd_start": 175.5,
+      "tokens": [
+        {
+          "label": "-l",
+          "ann": "算指紋",
+          "role": "ord",
+          "cs": 11,
+          "ce": 13,
+          "reveal": 175.9
+        },
+        {
+          "label": "-E md5",
+          "ann": "改用舊式的 MD5 格式顯示",
+          "role": "star",
+          "cs": 14,
+          "ce": 20,
+          "reveal": 177.691
+        },
+        {
+          "label": "-f id_demo.pub",
+          "ann": "目標公鑰",
+          "role": "path",
+          "cs": 21,
+          "ce": 35,
+          "reveal": 180.281
+        }
+      ],
+      "show_to": 189.062
+    },
+    {
+      "banner": 189.062,
+      "key": "ssh-keygen -v：畫出指紋的 randomart",
+      "hero": "ssh-keygen -lv -f id_demo.pub",
+      "cmd": "ssh-keygen -lv -f id_demo.pub",
+      "cmd_start": 189.062,
+      "tokens": [
+        {
+          "label": "ssh-keygen",
+          "ann": "金鑰工具",
+          "role": "path",
+          "cs": 0,
+          "ce": 10,
+          "reveal": 191.487
+        },
+        {
+          "label": "-lv",
+          "ann": "算指紋時再加 -v 畫出 randomart",
+          "role": "star",
+          "cs": 11,
+          "ce": 14,
+          "reveal": 191.936
+        },
+        {
+          "label": "-f id_demo.pub",
+          "ann": "目標公鑰",
+          "role": "path",
+          "cs": 15,
+          "ce": 29,
+          "reveal": 196.337
+        }
+      ],
+      "show_to": 206.037
+    },
+    {
+      "banner": 206.037,
+      "key": "~/.ssh/config：用 Host 區塊描述主機",
+      "hero": "gcat config",
+      "cmd": "gcat config",
+      "cmd_start": 206.037,
+      "tokens": [
+        {
+          "label": "gcat",
+          "ann": "印出檔案內容",
+          "role": "path",
+          "cs": 0,
+          "ce": 4,
+          "reveal": 208.5
+        },
+        {
+          "label": "config",
+          "ann": "SSH 的用戶端設定檔",
+          "role": "star",
+          "cs": 5,
+          "ce": 11,
+          "reveal": 210.798
+        }
+      ],
+      "show_to": 222.137
+    },
+    {
+      "banner": 222.137,
+      "key": "ssh -G：印出解析後的有效設定（不連線）",
+      "hero": "ssh -G web -F ./config",
+      "cmd": "ssh -G web -F ./config",
+      "cmd_start": 236.587,
+      "tokens": [
+        {
+          "label": "ssh",
+          "ann": "SSH 用戶端",
+          "role": "path",
+          "cs": 0,
+          "ce": 3,
+          "reveal": 238.035
+        },
+        {
+          "label": "-G",
+          "ann": "印出解析後的設定但不連線",
+          "role": "star",
+          "cs": 4,
+          "ce": 6,
+          "reveal": 239.482
+        },
+        {
+          "label": "web",
+          "ann": "要查詢的主機別名",
+          "role": "path",
+          "cs": 7,
+          "ce": 10,
+          "reveal": 239.882
+        },
+        {
+          "label": "-F ./config",
+          "ann": "指定要讀的設定檔",
+          "role": "ord",
+          "cs": 11,
+          "ce": 22,
+          "reveal": 240.282
+        }
+      ],
+      "show_to": 251.087
+    },
+    {
+      "banner": 251.087,
+      "key": "ssh-keygen -R：從 known_hosts 移除主機（破壞性）",
+      "hero": "ssh-keygen -R oldserver -f known_hosts",
+      "cmd": "ssh-keygen -R oldserver -f known_hosts",
+      "cmd_start": 261.575,
+      "tokens": [
+        {
+          "label": "ssh-keygen",
+          "ann": "金鑰工具",
+          "role": "path",
+          "cs": 0,
+          "ce": 10,
+          "reveal": 263.15
+        },
+        {
+          "label": "-R",
+          "ann": "移除某主機的已知金鑰",
+          "role": "star",
+          "cs": 11,
+          "ce": 13,
+          "reveal": 264.725
+        },
+        {
+          "label": "oldserver",
+          "ann": "要移除的主機名稱",
+          "role": "path",
+          "cs": 14,
+          "ce": 23,
+          "reveal": 266.3
+        },
+        {
+          "label": "-f known_hosts",
+          "ann": "指定 known_hosts 檔",
+          "role": "ord",
+          "cs": 24,
+          "ce": 38,
+          "reveal": 266.7
+        }
+      ],
+      "show_to": 289.488
+    }
+  ]
+}
