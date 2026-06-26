@@ -1,0 +1,571 @@
+{
+  "slug": "ifconfig",
+  "title": "ifconfig 教學 · 在 macOS 上查看網路介面與欄位",
+  "predicted_total": 289.152,
+  "anchor": 1.0,
+  "mp3": "/Users/htlin/vhs-demo/ifconfig/intermediate/audio/ifconfig.mp3",
+  "narration_dur": 286.752,
+  "cues": [
+    [
+      0.1,
+      7.612,
+      "每台電腦都連著網路，而 ifconfig 就是在終端機裡查看網路介面設定的經典工具。"
+    ],
+    [
+      7.562,
+      15.8,
+      "要先提醒的是，這裡的 ifconfig 是 macOS 上的 BSD 版本，輸出格式和 Linux 上的不太一樣。"
+    ],
+    [
+      15.8,
+      23.137,
+      "在 Linux 上現在大多改用 ip addr 這個指令，欄位排版會跟這支影片看到的不同。"
+    ],
+    [
+      23.137,
+      29.512,
+      "這支影片全程只做唯讀檢視，不會去修改任何一張網路卡的設定。"
+    ],
+    [
+      29.512,
+      39.912,
+      "另外有些長輸出我們會搭配 ghead 來截斷，它是 GNU 版的 head；在 Linux 上你直接打 head 就好，macOS 內建的 head 行為略有差異。"
+    ],
+    [
+      39.912,
+      44.425,
+      "好，我們先從怎麼把所有介面列出來開始。"
+    ],
+    [
+      44.425,
+      50.612,
+      "直接執行 ifconfig 會一次吐出全部介面的細節，資訊量其實很大。"
+    ],
+    [
+      50.612,
+      57.2,
+      "如果只想知道這台機器上到底有哪些介面，可以加上 -l 這個旗標。"
+    ],
+    [
+      57.2,
+      66.737,
+      "它只印出每個介面的名字，像 lo0、en0 這些，一行就看完了，是認識一台陌生機器最快的起手式。"
+    ],
+    [
+      66.737,
+      71.6,
+      "知道名字之後，下一步是看每個介面的完整內容。"
+    ],
+    [
+      71.6,
+      77.487,
+      "加上 -a，ifconfig 會把所有介面的詳細欄位一次全部印出來。"
+    ],
+    [
+      77.487,
+      84.8,
+      "因為輸出很長，我們用 ghead 接在後面，配合 -n 14 只取前 14 行來看。"
+    ],
+    [
+      84.8,
+      91.812,
+      "畫面上一次出現好幾個介面，每個都帶著自己的 flags、mtu 跟位址資訊。"
+    ],
+    [
+      91.812,
+      96.262,
+      "從這裡開始，我們把焦點放到單一介面上。"
+    ],
+    [
+      96.262,
+      101.912,
+      "第一個值得認識的是 lo0，它是每台機器都有的回送介面。"
+    ],
+    [
+      101.912,
+      110.812,
+      "它的位址固定是 127.0.0.1，也就是常說的 localhost，封包送進去會直接繞回自己。"
+    ],
+    [
+      110.812,
+      116.312,
+      "任何在本機自己跟自己溝通的程式，走的都是這條 lo0。"
+    ],
+    [
+      116.312,
+      121.05,
+      "真正連到外面世界的，通常是 en0 這張介面。"
+    ],
+    [
+      121.05,
+      126.45,
+      "在大多數的 Mac 上，en0 就是內建的乙太網路或無線網卡。"
+    ],
+    [
+      126.45,
+      133.0,
+      "這一大段就是 en0 的完整設定，接下來我們會逐一拆解裡面的每個欄位。"
+    ],
+    [
+      133.0,
+      138.475,
+      "先看 en0 的第一行，那一行就濃縮了介面最重要的狀態。"
+    ],
+    [
+      138.475,
+      143.4,
+      "我們用 ghead 配合 -n 1，只把開頭那一行抓出來。"
+    ],
+    [
+      143.4,
+      150.575,
+      "行首那串 flags 就是介面的狀態旗標，UP 代表已啟用、RUNNING 代表正在運作。"
+    ],
+    [
+      150.575,
+      154.925,
+      "第一行裡還藏著一個小數字，叫做 mtu。"
+    ],
+    [
+      154.925,
+      160.3,
+      "我們用 grep 搭配 -o，只把 mtu 那一小段精準地抓出來。"
+    ],
+    [
+      160.3,
+      167.212,
+      "mtu 是單一封包能裝的最大位元組數，乙太網路上常見的值是 1500。"
+    ],
+    [
+      167.212,
+      171.937,
+      "接下來是大家最關心的，這台機器的 IP 位址。"
+    ],
+    [
+      171.937,
+      176.85,
+      "把 en0 的輸出交給 grep，只留下含有 inet 的那一行。"
+    ],
+    [
+      176.85,
+      184.4,
+      "inet 後面那組數字就是這個介面的 IPv4 位址，也是區域網路裡找到你的門牌。"
+    ],
+    [
+      184.4,
+      190.675,
+      "注意我們在 inet 後面特意留了一個空格，就是為了避開 inet6 那幾行。"
+    ],
+    [
+      190.675,
+      194.937,
+      "跟 IP 位址形影不離的，是子網路遮罩。"
+    ],
+    [
+      194.937,
+      199.987,
+      "一樣用 grep 加上 -o，把 netmask 那一段單獨抽出來。"
+    ],
+    [
+      199.987,
+      211.1,
+      "netmask 決定 IP 位址裡哪部分是網段、哪部分是主機，BSD 這裡用十六進位的 0x 表示，Linux 則常寫成點分的形式。"
+    ],
+    [
+      211.1,
+      216.55,
+      "現在的網路同時也跑 IPv6，對應的欄位叫做 inet6。"
+    ],
+    [
+      216.55,
+      222.05,
+      "用 grep 過濾 inet6，就能看到這個介面所有的 IPv6 位址。"
+    ],
+    [
+      222.05,
+      228.387,
+      "開頭是 fe80 的那一條是 link-local 位址，只在這個區域網段內有效。"
+    ],
+    [
+      228.387,
+      233.075,
+      "位址聊得差不多了，我們往實體層再靠近一點。"
+    ],
+    [
+      233.075,
+      238.062,
+      "用 grep 找出 ether 這一行，看的是網路卡的硬體位址。"
+    ],
+    [
+      238.062,
+      245.912,
+      "ether 後面那組六段十六進位數字，就是俗稱的 MAC 位址，幾乎是全世界獨一無二的。"
+    ],
+    [
+      245.912,
+      251.175,
+      "知道是哪張卡之後，我們會想確認它現在到底通不通。"
+    ],
+    [
+      251.175,
+      256.337,
+      "grep 出 status 這一行，就能看出介面當前的連線狀態。"
+    ],
+    [
+      256.337,
+      262.487,
+      "status 顯示 active 代表線路是通的，如果是 inactive 就表示沒接上。"
+    ],
+    [
+      262.487,
+      267.087,
+      "最後一個欄位，是關於這條線實際能跑多快。"
+    ],
+    [
+      267.087,
+      272.875,
+      "用 grep 把 media 這一行抓出來，看的是實體連線的型態與速率。"
+    ],
+    [
+      272.875,
+      279.975,
+      "media 會告訴你協商出來的速度，例如 1000baseT 就是常見的 gigabit 乙太網路。"
+    ],
+    [
+      279.975,
+      286.7,
+      "從列出介面到讀懂每個欄位，現在你已經能完整看懂一張網卡的設定了。"
+    ]
+  ],
+  "panels": [
+    {
+      "banner": 1.0,
+      "key": "ifconfig · 在 macOS 上檢視網路介面",
+      "hero": null,
+      "cmd": null,
+      "cmd_start": null,
+      "tokens": [],
+      "show_to": 45.425
+    },
+    {
+      "banner": 45.425,
+      "key": "-l：只列出所有介面的名字",
+      "hero": "ifconfig -l",
+      "cmd": "ifconfig -l",
+      "cmd_start": 51.612,
+      "tokens": [
+        {
+          "label": "ifconfig",
+          "ann": "BSD 版的網路介面檢視工具",
+          "role": "path",
+          "cs": 0,
+          "ce": 8,
+          "reveal": 53.808
+        },
+        {
+          "label": "-l",
+          "ann": "只列出介面的名字，不印細節",
+          "role": "star",
+          "cs": 9,
+          "ce": 11,
+          "reveal": 56.553
+        }
+      ],
+      "show_to": 67.737
+    },
+    {
+      "banner": 67.737,
+      "key": "-a：印出每個介面的完整資訊",
+      "hero": "ifconfig -a | ghead -n 14",
+      "cmd": "ifconfig -a | ghead -n 14",
+      "cmd_start": 78.487,
+      "tokens": [
+        {
+          "label": "-a",
+          "ann": "印出所有介面的完整欄位",
+          "role": "star",
+          "cs": 9,
+          "ce": 11,
+          "reveal": 80.925
+        },
+        {
+          "label": "ghead",
+          "ann": "GNU 版的 head",
+          "role": "ord",
+          "cs": 14,
+          "ce": 19,
+          "reveal": 81.325
+        },
+        {
+          "label": "-n 14",
+          "ann": "只取前 14 行",
+          "role": "ord",
+          "cs": 20,
+          "ce": 25,
+          "reveal": 82.84
+        }
+      ],
+      "show_to": 92.812
+    },
+    {
+      "banner": 92.812,
+      "key": "lo0：每台機器都有的回送介面",
+      "hero": "ifconfig lo0",
+      "cmd": "ifconfig lo0",
+      "cmd_start": 97.262,
+      "tokens": [
+        {
+          "label": "lo0",
+          "ann": "回送介面 loopback",
+          "role": "star",
+          "cs": 9,
+          "ce": 12,
+          "reveal": 99.28
+        }
+      ],
+      "show_to": 117.312
+    },
+    {
+      "banner": 117.312,
+      "key": "en0：對外連線的主要介面",
+      "hero": "ifconfig en0",
+      "cmd": "ifconfig en0",
+      "cmd_start": 122.05,
+      "tokens": [
+        {
+          "label": "en0",
+          "ann": "對外連線的主要介面",
+          "role": "star",
+          "cs": 9,
+          "ce": 12,
+          "reveal": 124.14
+        }
+      ],
+      "show_to": 134.0
+    },
+    {
+      "banner": 134.0,
+      "key": "flags：介面的狀態旗標 UP/RUNNING",
+      "hero": "ifconfig en0 | ghead -n 1",
+      "cmd": "ifconfig en0 | ghead -n 1",
+      "cmd_start": 139.475,
+      "tokens": [
+        {
+          "label": "ghead",
+          "ann": "GNU 版的 head",
+          "role": "ord",
+          "cs": 15,
+          "ce": 20,
+          "reveal": 140.154
+        },
+        {
+          "label": "-n 1",
+          "ann": "只取第一行",
+          "role": "star",
+          "cs": 21,
+          "ce": 25,
+          "reveal": 141.683
+        }
+      ],
+      "show_to": 151.575
+    },
+    {
+      "banner": 151.575,
+      "key": "mtu：單一封包的最大位元組數",
+      "hero": "ifconfig en0 | grep -o 'mtu [0-9]*'",
+      "cmd": "ifconfig en0 | grep -o 'mtu [0-9]*'",
+      "cmd_start": 155.925,
+      "tokens": [
+        {
+          "label": "grep",
+          "ann": "逐行過濾輸出",
+          "role": "ord",
+          "cs": 15,
+          "ce": 19,
+          "reveal": 156.577
+        },
+        {
+          "label": "-o",
+          "ann": "只印出比對到的片段",
+          "role": "ord",
+          "cs": 20,
+          "ce": 22,
+          "reveal": 157.88
+        },
+        {
+          "label": "mtu",
+          "ann": "單一封包的最大位元組數",
+          "role": "star",
+          "cs": 24,
+          "ce": 27,
+          "reveal": 158.857
+        }
+      ],
+      "show_to": 168.212
+    },
+    {
+      "banner": 168.212,
+      "key": "inet：這個介面的 IPv4 位址",
+      "hero": "ifconfig en0 | grep 'inet '",
+      "cmd": "ifconfig en0 | grep 'inet '",
+      "cmd_start": 172.937,
+      "tokens": [
+        {
+          "label": "grep",
+          "ann": "過濾出含關鍵字的行",
+          "role": "ord",
+          "cs": 15,
+          "ce": 19,
+          "reveal": 174.724
+        },
+        {
+          "label": "inet",
+          "ann": "這個介面的 IPv4 位址",
+          "role": "star",
+          "cs": 21,
+          "ce": 25,
+          "reveal": 176.361
+        }
+      ],
+      "show_to": 191.675
+    },
+    {
+      "banner": 191.675,
+      "key": "netmask：劃分網段的子網路遮罩",
+      "hero": "ifconfig en0 | grep -o 'netmask 0x[0-9a-f]*'",
+      "cmd": "ifconfig en0 | grep -o 'netmask 0x[0-9a-f]*'",
+      "cmd_start": 195.937,
+      "tokens": [
+        {
+          "label": "grep",
+          "ann": "逐行過濾",
+          "role": "ord",
+          "cs": 15,
+          "ce": 19,
+          "reveal": 196.531
+        },
+        {
+          "label": "-o",
+          "ann": "只取比對到的片段",
+          "role": "ord",
+          "cs": 20,
+          "ce": 22,
+          "reveal": 197.719
+        },
+        {
+          "label": "netmask",
+          "ann": "劃分網段的子網路遮罩",
+          "role": "star",
+          "cs": 24,
+          "ce": 31,
+          "reveal": 198.462
+        }
+      ],
+      "show_to": 212.1
+    },
+    {
+      "banner": 212.1,
+      "key": "inet6：這個介面的 IPv6 位址",
+      "hero": "ifconfig en0 | grep inet6",
+      "cmd": "ifconfig en0 | grep inet6",
+      "cmd_start": 217.55,
+      "tokens": [
+        {
+          "label": "grep",
+          "ann": "過濾出該欄位",
+          "role": "ord",
+          "cs": 15,
+          "ce": 19,
+          "reveal": 218.006
+        },
+        {
+          "label": "inet6",
+          "ann": "這個介面的 IPv6 位址",
+          "role": "star",
+          "cs": 20,
+          "ce": 25,
+          "reveal": 219.078
+        }
+      ],
+      "show_to": 229.387
+    },
+    {
+      "banner": 229.387,
+      "key": "ether：網路卡的 MAC 硬體位址",
+      "hero": "ifconfig en0 | grep ether",
+      "cmd": "ifconfig en0 | grep ether",
+      "cmd_start": 234.075,
+      "tokens": [
+        {
+          "label": "grep",
+          "ann": "過濾出該欄位",
+          "role": "ord",
+          "cs": 15,
+          "ce": 19,
+          "reveal": 234.531
+        },
+        {
+          "label": "ether",
+          "ann": "網路卡的 MAC 硬體位址",
+          "role": "star",
+          "cs": 20,
+          "ce": 25,
+          "reveal": 235.633
+        }
+      ],
+      "show_to": 246.912
+    },
+    {
+      "banner": 246.912,
+      "key": "status：介面目前是否在線",
+      "hero": "ifconfig en0 | grep status",
+      "cmd": "ifconfig en0 | grep status",
+      "cmd_start": 252.175,
+      "tokens": [
+        {
+          "label": "grep",
+          "ann": "過濾出該欄位",
+          "role": "ord",
+          "cs": 15,
+          "ce": 19,
+          "reveal": 252.631
+        },
+        {
+          "label": "status",
+          "ann": "介面目前是否在線",
+          "role": "star",
+          "cs": 20,
+          "ce": 26,
+          "reveal": 253.304
+        }
+      ],
+      "show_to": 263.487
+    },
+    {
+      "banner": 263.487,
+      "key": "media：實體連線的速率與型態",
+      "hero": "ifconfig en0 | grep media",
+      "cmd": "ifconfig en0 | grep media",
+      "cmd_start": 268.087,
+      "tokens": [
+        {
+          "label": "grep",
+          "ann": "過濾出該欄位",
+          "role": "ord",
+          "cs": 15,
+          "ce": 19,
+          "reveal": 268.543
+        },
+        {
+          "label": "media",
+          "ann": "實體連線的速率與型態",
+          "role": "star",
+          "cs": 20,
+          "ce": 25,
+          "reveal": 269.534
+        }
+      ],
+      "show_to": 289.152
+    }
+  ]
+}

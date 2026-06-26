@@ -76,10 +76,10 @@ Pattern per command scene (mirror ./jq/lesson.py, the reference example):
 ENGINE COMMANDS — scaffold the portable folder once, then build INSIDE it
 (CWD = repo root; everything is self-contained under ./<slug>/ so runs are
 parallel-safe by folder):
-  # scaffold from the template (first author pass only)
-  command cp -R engine <slug>
-  command mv <slug>/CLAUDE.tmpl.md <slug>/CLAUDE.md && sed -i '' "s/{{SLUG}}/<slug>/g" <slug>/CLAUDE.md
-  command rm <slug>/lesson.skel.py                       # you write <slug>/lesson.py instead
+  # scaffold (first author pass) — copy ONLY what a clip needs from the template
+  mkdir -p <slug>/src && command cp -R engine/src/. <slug>/src/
+  command cp engine/config.toml <slug>/config.toml
+  command cp engine/CLAUDE.tmpl.md <slug>/CLAUDE.md && sed -i '' "s/{{SLUG}}/<slug>/g" <slug>/CLAUDE.md
   ( cd <slug> && uv venv .venv && uv pip install --python .venv/bin/python pillow numpy )
   # 1) narration + tape + timeline
   ( cd <slug> && python3 src/build.py )                  # prints "predicted total = Xs"
@@ -304,9 +304,9 @@ ${JSON.stringify(plan, null, 2)}
 
 ${first ? `
 SCAFFOLD the portable folder from the template, then write your two files:
-  command cp -R engine ${slug}
-  command mv ${slug}/CLAUDE.tmpl.md ${slug}/CLAUDE.md && sed -i '' "s/{{SLUG}}/${slug}/g" ${slug}/CLAUDE.md
-  command rm ${slug}/lesson.skel.py
+  mkdir -p ${slug}/src && command cp -R engine/src/. ${slug}/src/
+  command cp engine/config.toml ${slug}/config.toml
+  command cp engine/CLAUDE.tmpl.md ${slug}/CLAUDE.md && sed -i '' "s/{{SLUG}}/${slug}/g" ${slug}/CLAUDE.md
 Now write (in the ${slug}/ folder):
   ${slug}/lesson.py   (from clipkit import S, R, CLR; SLUG="${slug}", TITLE, SCRIPT per the plan)
   ${slug}/setup.sh    (chmod +x; demo env per the ENGINE setup.sh contract)
