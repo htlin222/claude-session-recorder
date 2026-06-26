@@ -41,6 +41,16 @@ SCRIPT builders (imported from lesson):
              typing. role -> colour: "ord"=ordinary flag, "star"=the scene's KEY
              flag/idea, "path"=operands/paths/args.
 
+PLATFORM (this renders on macOS): many coreutils here are BSD/variant builds that
+differ from Linux/GNU — e.g. \`sed\` is BSD sed (\\w \\b \\+ and \\t/\\n in
+replacements don't work, \`-i\` differs), \`awk\` is one-true-awk, \`grep\` may be
+ugrep, \`date\`/\`stat\` differ. If a learner on Linux would see DIFFERENT output
+than what renders here, that's a defect. So either (a) teach the GNU variant
+explicitly — \`gsed\`/\`gawk\`/\`gdate\` (brew gnu-sed / gawk / coreutils), noting
+in the intro that on Linux it's the bare name — or (b) restrict strictly to the
+identical POSIX subset. Quick-check a doubtful command both ways before relying on
+its output. Never show output that would differ on Linux without flagging it.
+
 HARD RULES (the build will reject or mis-sync otherwise):
   1. toks are listed LEFT-TO-RIGHT as they appear in hero; each substr must be
      findable in hero in that order (no overlaps).
