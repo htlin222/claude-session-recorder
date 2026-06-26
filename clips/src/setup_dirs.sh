@@ -2,7 +2,7 @@
 # (Re)create the demo source/dest folders in their INITIAL state.
 # Re-run this right before every `vhs demo.tape` render.
 set -euo pipefail
-DEMO="$(cd "$(dirname "$0")" && pwd)"
+DEMO="$(cd "$(dirname "$0")/../intermediate" && pwd)"
 cd "$DEMO"
 
 rm -rf A B C

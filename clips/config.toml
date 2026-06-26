@@ -1,0 +1,38 @@
+# clips — rsync teaching demo config. Edit these knobs, then re-run the pipeline
+# (see CLAUDE.md). build.py and overlay.py read this file; missing keys fall
+# back to the defaults shown here.
+
+[voice]                       # edge-tts narration
+name = "zh-TW-HsiaoChenNeural"
+rate = "+0%"
+
+[render]                      # VHS terminal (left pane)
+width = 1200
+height = 1080
+font_size = 26
+typing_speed_ms = 45          # what the tape SETs; real ≈ 24ms/char (see timing.ts)
+
+[timing]                      # seconds
+ts = 0.024                    # MODELLED real per-char typing (calibrated, ≠ set)
+initial = 1.0                 # idle before narration begins
+output_min = 0.45             # min dwell on output after <CR>
+tail = 1.4
+hold = 1.0                    # freeze-hold on the last output before a transition
+xfade = 0.5                   # crossfade between scenes
+safety = 0.25                 # end a scene's video this early so the hold grabs
+                              #   the last output frame, not the post-clear blank
+panel_lead = -0.08            # banner switches just after the clear (its own segment)
+intro = 0.6                   # dissolve-in: hold pure bg this long, then fade in
+fade_in = 0.7
+fade_out = 0.9                # fade the last clip out
+
+# right-panel token colours (RGB), one per token by position — no repeats
+[panel]
+palette = [
+  [166, 227, 161],            # green
+  [137, 180, 250],            # blue
+  [250, 179, 135],            # peach
+  [203, 166, 247],            # mauve
+  [148, 226, 213],            # teal
+  [249, 226, 175],            # yellow
+]

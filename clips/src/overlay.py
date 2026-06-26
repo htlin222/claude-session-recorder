@@ -12,15 +12,18 @@ with the deliberate typing. Colours: ord=green, star=peach, path=mauve."""
 import json
 import os
 import subprocess
+import tomllib
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-DEMO = os.path.dirname(os.path.abspath(__file__))
-AV = f"{DEMO}/_av.mp4"
-FINAL = f"{DEMO}/rsync-demo-final.mp4"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clips/
+DEMO = f"{ROOT}/intermediate"
+DIST = f"{ROOT}/dist"
+FINAL = f"{DIST}/rsync-demo-final.mp4"
 PDIR = f"{DEMO}/_panels"
 FF = "/opt/homebrew/bin/ffmpeg"
+_T = tomllib.load(open(f"{ROOT}/config.toml", "rb"))["timing"]
 
 CW, H, TERM_W = 1920, 1080, 1200
 PANEL_W = CW - TERM_W                 # 720
@@ -31,8 +34,8 @@ TEXT = (205, 214, 244)
 HL = (49, 50, 68)
 ROLE = {"ord": (166, 227, 161), "star": (250, 179, 135), "path": (203, 166, 247)}
 # distinct colour per token (by position) so no two tokens share a colour
-PALETTE = [(166, 227, 161), (137, 180, 250), (250, 179, 135),
-           (203, 166, 247), (148, 226, 213), (249, 226, 175)]
+PALETTE = [tuple(c) for c in
+           tomllib.load(open(f"{ROOT}/config.toml", "rb"))["panel"]["palette"]]
 PAD = 42
 CMD_Y = 172
 CMD_SIZE = 27
@@ -41,16 +44,13 @@ ROW_H = 128
 TOK_PADX = 7          # token highlight box padding (more breathing room)
 TOK_PADT = 9
 TOK_PADB = 14
-PANEL_LEAD = -0.08    # banner switches just AFTER the detected clear so it lands
-                      # in the NEXT segment — each scene's freeze-hold then holds
-                      # its own (matching) panel frame, not the next scene's
-INTRO = 0.6           # dissolve-in: hold pure bg this long, then fade
-FADE = 0.7            # fade-in duration
-FADEOUT = 0.9         # fade the last clip out at the end
-HOLD = 1.0            # freeze-hold at the end of each scene before transition
-XF = 0.5              # crossfade duration between scenes
-SAFETY = 0.25         # end each scene's video this much BEFORE the clear, so the
-                      # freeze-hold grabs the last output frame, not the blank
+PANEL_LEAD = _T["panel_lead"]   # banner lands in its own segment (see config)
+INTRO = _T["intro"]
+FADE = _T["fade_in"]
+FADEOUT = _T["fade_out"]
+HOLD = _T["hold"]
+XF = _T["xfade"]
+SAFETY = _T["safety"]
 INNER = PANEL_W - 2 * PAD
 _d = ImageDraw.Draw(Image.new("RGBA", (4, 4)))
 CMD_F = ImageFont.truetype(MONO, CMD_SIZE)
@@ -389,7 +389,7 @@ def main():
                     "-b:a", "160k", FINAL], check=True, capture_output=True)
 
     # sidecar subtitles (NOT burned in), built on the new per-scene timeline
-    dst = f"{DEMO}/rsync-demo-final.srt"
+    dst = f"{DIST}/rsync-demo-final.srt"
     if synced:
         build_subs(tl["cues"], ab, S, delays, INITIAL, INTRO, dst)
     else:

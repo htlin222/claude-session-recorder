@@ -11,7 +11,7 @@ import json
 import subprocess
 
 import os
-DEMO = os.path.dirname(os.path.abspath(__file__))
+DEMO = f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}/intermediate"
 VIDEO = f"{DEMO}/rsync-demo.mp4"
 AV = f"{DEMO}/_av.mp4"
 
