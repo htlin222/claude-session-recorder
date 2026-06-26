@@ -1,0 +1,22 @@
+{
+  "slug": "cp",
+  "expected_scenes": 11,
+  "detected_clears": 11,
+  "method": "guided",
+  "structural_synced": true,
+  "terminal_sec": 265.52,
+  "final_sec": 292.68,
+  "narration_sec": 277.8,
+  "narration_fits": true,
+  "target_sec": 300.0,
+  "on_target": true,
+  "jcut_applied": 11,
+  "jcut_total": 11,
+  "jcut_mean_sec": 0.35,
+  "jcut_clips": 0,
+  "min_gap_sec": 0.993,
+  "voice_overruns": 0,
+  "fixable": false,
+  "override_written": false,
+  "verdict": "PASS"
+}
