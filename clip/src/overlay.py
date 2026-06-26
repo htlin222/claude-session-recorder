@@ -14,11 +14,15 @@ import os
 import subprocess
 import tomllib
 
+import lesson
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clip/
-DEMO = f"{ROOT}/intermediate"
+# per-slug workspace (must match build.py); pass LESSON=<slug> so concurrent
+# overlays read their OWN render, not config.toml's single active lesson.
+SLUG = lesson.active_slug(ROOT)
+DEMO = lesson.workspace(ROOT, SLUG)
 DIST = f"{ROOT}/dist"
 TERMINAL = f"{DEMO}/terminal.mp4"     # tool-agnostic VHS render (left pane)
 PDIR = f"{DEMO}/_panels"

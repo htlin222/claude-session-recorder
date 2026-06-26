@@ -34,7 +34,6 @@ import subprocess
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clip/
 REPO = os.path.dirname(ROOT)
-DEMO = f"{ROOT}/intermediate"
 DIST = f"{ROOT}/dist"
 VENV = f"{ROOT}/.venv/bin/python"                # verify_sync needs numpy
 
@@ -47,18 +46,19 @@ def main():
     ap.add_argument("--tol-sec", type=float, default=60.0)
     a = ap.parse_args()
     slug = a.slug
+    demo = f"{ROOT}/intermediate/{slug}"          # per-slug workspace
     dest = a.dest or f"{REPO}/{slug}"
     bdir = f"{dest}/provenance"
     os.makedirs(bdir, exist_ok=True)
 
     # small provenance + the two expensive-to-regenerate artifacts
     copies = [
-        (f"{DEMO}/timeline.json", "timeline.json"),
-        (f"{DEMO}/sync_report.json", "sync_report.json"),
-        (f"{DEMO}/jcut_report.json", "jcut_report.json"),
-        (f"{DEMO}/demo.tape", "demo.tape"),
-        (f"{DEMO}/terminal.mp4", "terminal.mp4"),
-        (f"{DEMO}/audio/{slug}.mp3", "narration.mp3"),
+        (f"{demo}/timeline.json", "timeline.json"),
+        (f"{demo}/sync_report.json", "sync_report.json"),
+        (f"{demo}/jcut_report.json", "jcut_report.json"),
+        (f"{demo}/demo.tape", "demo.tape"),
+        (f"{demo}/terminal.mp4", "terminal.mp4"),
+        (f"{demo}/audio/{slug}.mp3", "narration.mp3"),
         (f"{ROOT}/config.toml", "config.toml"),
         (f"{DIST}/{slug}.build.log", "build.log"),
     ]
@@ -123,11 +123,12 @@ def main():
         "## Re-render from this bundle (no vhs)", "",
         "```bash",
         "# from repo root — restore the scratch this render needs, then re-composite",
-        f"cp {slug}/provenance/timeline.json   clip/intermediate/timeline.json",
-        f"cp {slug}/provenance/terminal.mp4    clip/intermediate/terminal.mp4",
-        f"cp {slug}/provenance/narration.mp3   clip/intermediate/audio/{slug}.mp3",
-        f"rm -f clip/intermediate/clears_override.json",
-        "( cd clip && .venv/bin/python src/overlay.py )   # -> clip/dist/" + slug + ".mp4",
+        f"mkdir -p clip/intermediate/{slug}/audio",
+        f"cp {slug}/provenance/timeline.json   clip/intermediate/{slug}/timeline.json",
+        f"cp {slug}/provenance/terminal.mp4    clip/intermediate/{slug}/terminal.mp4",
+        f"cp {slug}/provenance/narration.mp3   clip/intermediate/{slug}/audio/{slug}.mp3",
+        f"rm -f clip/intermediate/{slug}/clears_override.json",
+        f"( cd clip && LESSON={slug} .venv/bin/python src/overlay.py )   # -> clip/dist/{slug}.mp4",
         "```",
         "",
         f"Canonical lesson source (edit + full rebuild): `clip/lessons/{slug}/`.",

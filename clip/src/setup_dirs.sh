@@ -17,5 +17,8 @@ PY
 
 SETUP="$ROOT/lessons/$ACTIVE/setup.sh"
 [ -f "$SETUP" ] || { echo "no setup.sh for lesson '$ACTIVE' ($SETUP)" >&2; exit 1; }
-echo "setup: lesson '$ACTIVE'"
+# per-slug workspace so concurrent renders don't share a demo env
+export CLIP_DEMO="$ROOT/intermediate/$ACTIVE"
+mkdir -p "$CLIP_DEMO"
+echo "setup: lesson '$ACTIVE' -> intermediate/$ACTIVE"
 exec bash "$SETUP"

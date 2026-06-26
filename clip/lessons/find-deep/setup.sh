@@ -7,7 +7,10 @@
 # (-newer), a logs/ subtree (-path), node_modules/ (-prune), .log files (-exec),
 # and .tmp files (-delete). Idempotent: wipes and recreates app/ each run.
 set -euo pipefail
-DEMO="$(cd "$(dirname "$0")/../../intermediate" && pwd)"
+# per-slug workspace: dispatcher exports CLIP_DEMO; fallback derives it from
+# this lesson's folder name so the script still works run standalone.
+DEMO="${CLIP_DEMO:-$(cd "$(dirname "$0")/../../intermediate" && pwd)/$(basename "$(dirname "$0")")}"
+mkdir -p "$DEMO"
 cd "$DEMO"
 
 rm -rf app

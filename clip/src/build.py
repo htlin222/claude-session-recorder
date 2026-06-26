@@ -20,8 +20,6 @@ import tomllib
 import lesson                                  # S/R/CLR builders + lesson loader
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clip/
-DEMO = f"{ROOT}/intermediate"
-AUDIO = f"{DEMO}/audio"
 LESSONS_DIR = f"{ROOT}/lessons"
 CFG = tomllib.load(open(f"{ROOT}/config.toml", "rb"))
 VOICE, RATE = CFG["voice"]["name"], CFG["voice"]["rate"]
@@ -37,9 +35,12 @@ TAIL = _T["tail"]
 # /clip workflow to target one slug without touching config) > config.toml
 # [lesson] active > "rsync". The lesson supplies SCRIPT plus a SLUG/TITLE that
 # name the outputs.
-ACTIVE = os.environ.get("LESSON") or CFG.get("lesson", {}).get("active", "rsync")
+ACTIVE = lesson.active_slug(ROOT)
 _L = lesson.load(ACTIVE, LESSONS_DIR)
 SCRIPT, SLUG, TITLE = _L.SCRIPT, _L.SLUG, _L.TITLE
+# per-slug workspace so concurrent renders don't collide (see lesson.workspace)
+DEMO = lesson.workspace(ROOT, SLUG)
+AUDIO = f"{DEMO}/audio"
 
 
 def parse_srt(path):

@@ -22,9 +22,10 @@ A *lesson* is the only thing you create. It lives in  clip/lessons/<slug>/  and 
                  SLUG  = "<slug>"                     # kebab-case; names all outputs
                  TITLE = "<human title>"
                  SCRIPT = [ ...timeline... ]
-  setup.sh   - bash, '#!/usr/bin/env bash' + 'set -euo pipefail'; (re)creates this
-               lesson's throwaway demo env under clip/intermediate/. Start with:
-                 DEMO="$(cd "$(dirname "$0")/../../intermediate" && pwd)"; cd "$DEMO"
+  setup.sh   - bash '#!/usr/bin/env bash' + 'set -euo pipefail'; (re)creates this
+               lesson's throwaway demo env in its PER-SLUG workspace. Start with:
+                 DEMO="\${CLIP_DEMO:-$(cd "$(dirname "$0")/../../intermediate" && pwd)/$(basename "$(dirname "$0")")}"
+                 mkdir -p "$DEMO"; cd "$DEMO"
                then 'rm -rf <yourdirs>' and recreate them. Must be idempotent and
                self-contained. Make any file the commands need (sample trees, a
                >1MB file for size demos, backdated timestamps for time demos, etc).
@@ -62,13 +63,15 @@ Pattern per command scene (mirror clip/lessons/rsync/lesson.py and find/lesson.p
 ENGINE COMMANDS (run from repo root; <slug> is your lesson slug):
   # one-time venv for the panel renderer (skip if clip/.venv exists)
   ( cd clip && uv venv .venv && uv pip install --python .venv/bin/python pillow numpy )
-  # 1) narration + tape + timeline   (LESSON env targets your slug, no config edit)
+  # Every step is PER-SLUG (workspace = clip/intermediate/<slug>) so runs are
+  # parallel-safe. LESSON=<slug> picks the slug for build/overlay/setup.
+  # 1) narration + tape + timeline
   ( cd clip && LESSON=<slug> python3 src/build.py )      # prints "predicted total = Xs"
-  # 2) build env + render terminal
+  # 2) build env + render terminal (vhs runs INSIDE the per-slug workspace)
   ( cd clip && LESSON=<slug> bash src/setup_dirs.sh )
-  ( cd clip/intermediate && vhs demo.tape )             # -> clip/intermediate/terminal.mp4
+  ( cd clip/intermediate/<slug> && vhs demo.tape )      # -> clip/intermediate/<slug>/terminal.mp4
   # 3) composite panel + transitions + fades
-  ( cd clip && .venv/bin/python src/overlay.py )        # -> clip/dist/<slug>.mp4 + .srt
+  ( cd clip && LESSON=<slug> .venv/bin/python src/overlay.py )   # -> clip/dist/<slug>.mp4 + .srt
 
 DURATION CALIBRATION: build's "predicted total" is the narration length; overlay
 then adds intro/holds/transitions (~+1s per scene, ~+13s total for a 5–6 min clip).
@@ -268,9 +271,9 @@ The lesson files exist and build.py already produced clip/intermediate/demo.tape
 and timeline.json for this slug (predicted ${fit.predicted_sec}s). Start a fresh
 build log, then run each step teeing into it (the log is bundled into the product):
   : > clip/dist/${slug}.build.log
-  ( cd clip && LESSON=${slug} bash src/setup_dirs.sh )      2>&1 | tee -a clip/dist/${slug}.build.log
-  ( cd clip/intermediate && vhs demo.tape )                 2>&1 | tee -a clip/dist/${slug}.build.log
-  ( cd clip && .venv/bin/python src/overlay.py )            2>&1 | tee -a clip/dist/${slug}.build.log
+  ( cd clip && LESSON=${slug} bash src/setup_dirs.sh )              2>&1 | tee -a clip/dist/${slug}.build.log
+  ( cd clip/intermediate/${slug} && vhs demo.tape )                 2>&1 | tee -a clip/dist/${slug}.build.log
+  ( cd clip && LESSON=${slug} .venv/bin/python src/overlay.py )     2>&1 | tee -a clip/dist/${slug}.build.log
 
 Then confirm clip/dist/${slug}.mp4 and clip/dist/${slug}.srt exist and probe the
 mp4 duration with ffprobe. If vhs or ffmpeg errors, read the error, fix the
@@ -295,9 +298,9 @@ overlay.py honors a guided-clears override. Run from the repo root:
 Read its output: a line "[${slug}] PASS|FAIL_FIXABLE|FAIL: ..." and a machine line
 "VERIFY_JSON {...}". Then:
   - PASS  -> nothing to do; report it.
-  - FAIL_FIXABLE -> it wrote intermediate/clears_override.json (guided clears that
-      give the correct scene count). RE-COMPOSITE without re-running vhs:
-        ( cd clip && .venv/bin/python src/overlay.py )                            2>&1 | tee -a clip/dist/${slug}.build.log
+  - FAIL_FIXABLE -> it wrote intermediate/${slug}/clears_override.json (guided
+      clears that fix the scene count). RE-COMPOSITE without re-running vhs:
+        ( cd clip && LESSON=${slug} .venv/bin/python src/overlay.py )             2>&1 | tee -a clip/dist/${slug}.build.log
       then RE-VERIFY to confirm it's now in sync:
         ( cd clip && .venv/bin/python src/verify_sync.py --slug ${slug} --target-sec ${targetSec} --tol-sec 60 ) 2>&1 | tee -a clip/dist/${slug}.build.log
       Report the FINAL verdict after re-verify. Set fix_applied=true.
@@ -350,7 +353,7 @@ this render (timeline/sync/jcut reports, verify.json, config snapshot, terminal.
 + narration.mp3, lesson source, build.log) and that provenance/PROVENANCE.md explains
 how to re-composite from it without re-running vhs; and a note that the canonical source
 lesson lives in clip/lessons/${slug}/ and a full rebuild is
-\`( cd clip && LESSON=${slug} python3 src/build.py && LESSON=${slug} bash src/setup_dirs.sh ) && ( cd clip/intermediate && vhs demo.tape ) && ( cd clip && .venv/bin/python src/overlay.py )\`.
+\`( cd clip && LESSON=${slug} python3 src/build.py && LESSON=${slug} bash src/setup_dirs.sh ) && ( cd clip/intermediate/${slug} && vhs demo.tape ) && ( cd clip && LESSON=${slug} .venv/bin/python src/overlay.py )\`.
 
 List every file you placed in ${slug}/ (including the provenance/ bundle's contents).
 `.trim(), { schema: DELIVER, phase: 'Deliver', label: `deliver ${slug}` })

@@ -35,12 +35,11 @@ import os
 import subprocess
 import sys
 
+import lesson
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clip/
-DEMO = f"{ROOT}/intermediate"
 DIST = f"{ROOT}/dist"
-TERMINAL = f"{DEMO}/terminal.mp4"
 FF = "/opt/homebrew/bin/ffmpeg"
 
 # detection grid identical to overlay.detect_clears, so "default count" here
@@ -101,19 +100,21 @@ def main():
     ap.add_argument("--write-override", action="store_true",
                     help="when fixable, write intermediate/clears_override.json")
     a = ap.parse_args()
+    slug = a.slug or lesson.active_slug(ROOT)
+    demo = lesson.workspace(ROOT, slug)        # per-slug workspace (parallel-safe)
+    terminal = f"{demo}/terminal.mp4"
 
-    tl = json.load(open(f"{DEMO}/timeline.json", encoding="utf-8"))
-    slug = a.slug or tl.get("slug", "demo")
+    tl = json.load(open(f"{demo}/timeline.json", encoding="utf-8"))
     final = f"{DIST}/{slug}.mp4"
     panels = tl["panels"]
     expected = len(panels) - 1
 
     report = {}
-    rp = f"{DEMO}/sync_report.json"
+    rp = f"{demo}/sync_report.json"
     if os.path.exists(rp):
         report = json.load(open(rp))
 
-    term_dur = _dur(TERMINAL)
+    term_dur = _dur(terminal)
     final_dur = _dur(final) if os.path.exists(final) else 0.0
     narr = tl["narration_dur"]
 
@@ -121,7 +122,7 @@ def main():
     if "synced" in report:
         synced, detected, method = report["synced"], report["detected"], report.get("method", "detect")
     else:
-        c = content_signal(TERMINAL)
+        c = content_signal(terminal)
         det = default_clears(c)
         detected, method = len(det), "detect"
         synced = detected == expected
@@ -136,7 +137,7 @@ def main():
     # narration (lead must stay within gap-guard); J-cut absence is fine.
     jcut_total = jcut_applied = jcut_clip = voice_overruns = 0
     jcut_mean = min_gap = 0.0
-    jrp = f"{DEMO}/jcut_report.json"
+    jrp = f"{demo}/jcut_report.json"
     if os.path.exists(jrp):
         jc = json.load(open(jrp))
         g = jc.get("guard", 0.12)
@@ -169,7 +170,7 @@ def main():
     if not passed and not synced:
         # only structural desync is auto-fixable: sweep the threshold for the
         # count-correct clears and offer them as an override
-        c = content_signal(TERMINAL)
+        c = content_signal(terminal)
         g, frac = search_clears(c, expected)
         if g and len(g) == expected:
             verdict["fixable"] = True
@@ -177,7 +178,7 @@ def main():
             verdict["healed_frac"] = frac
             if a.write_override:
                 json.dump({"slug": slug, "clears": g, "source": f"verify_sync.search(frac={frac})"},
-                          open(f"{DEMO}/clears_override.json", "w"))
+                          open(f"{demo}/clears_override.json", "w"))
                 verdict["override_written"] = True
 
     code = 0 if passed else (1 if verdict["fixable"] else 2)

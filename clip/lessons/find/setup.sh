@@ -4,7 +4,10 @@
 # bumped to "now" so exactly those show up as recently modified. Run via
 # src/setup_dirs.sh right before every `vhs` render.
 set -euo pipefail
-DEMO="$(cd "$(dirname "$0")/../../intermediate" && pwd)"
+# per-slug workspace: dispatcher exports CLIP_DEMO; fallback derives it from
+# this lesson's folder name so the script still works run standalone.
+DEMO="${CLIP_DEMO:-$(cd "$(dirname "$0")/../../intermediate" && pwd)/$(basename "$(dirname "$0")")}"
+mkdir -p "$DEMO"
 cd "$DEMO"
 
 rm -rf proj

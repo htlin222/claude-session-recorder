@@ -47,6 +47,27 @@ def CLR(key=None, hero=None, toks=None):
     return ("clear", key, hero, toks or [])
 
 
+def active_slug(root, default="rsync"):
+    """Which lesson is being rendered: $LESSON env > config.toml [lesson] active.
+    Shared by build/overlay/setup so each derives the SAME per-slug workspace."""
+    import tomllib
+    s = os.environ.get("LESSON")
+    if s:
+        return s
+    try:
+        cfg = tomllib.load(open(os.path.join(root, "config.toml"), "rb"))
+        return cfg.get("lesson", {}).get("active", default)
+    except Exception:                       # noqa: BLE001
+        return default
+
+
+def workspace(root, slug):
+    """Per-slug scratch dir under intermediate/. Isolating each render here is
+    what lets multiple /clip runs render CONCURRENTLY without clobbering one
+    another's terminal.mp4 / demo.tape / timeline.json / demo env."""
+    return os.path.join(root, "intermediate", slug)
+
+
 def load(name, lessons_dir):
     """Import lessons/<name>/lesson.py and return the module (validated)."""
     path = os.path.join(lessons_dir, name, "lesson.py")

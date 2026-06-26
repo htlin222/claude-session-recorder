@@ -29,7 +29,8 @@ clip/
     find/
       lesson.py        # 第二支範例：用述詞在 proj/ 樹裡定位檔案
       setup.sh         # 建/重置 proj/ 範例樹（含 -size/-mtime 的刻意佈置）
-  intermediate/        # 產生物：terminal.mp4 / demo.tape / timeline.json / audio/<slug>.* / A,B,C,proj / _*（皆可再生）
+  intermediate/<slug>/ # 每個 lesson 各自的工作區（並行安全）：terminal.mp4 / demo.tape /
+                       #   timeline.json / audio/ / demo env(A,B,C,proj…) / _*（皆可再生）
   dist/                # 成品：<slug>.mp4 (+ <slug>.srt 外掛字幕 / <slug>.html)，逐 lesson 累積
   context/             # 設計與踩坑筆記（sync-model / panel-design / lessons-learned）
 ```
@@ -45,8 +46,9 @@ openrsync）、`edge-tts`、`tree`，Python 3.11+（內建 `tomllib`），側欄
 變數 `LESSON=<slug>` 臨時覆寫（優先於 config，不必改檔）——`build.py` 與
 `setup_dirs.sh` 都認得，root 的 `/clip` workflow 就靠它鎖定單一 slug。輸出檔名依
 lesson 的 `SLUG`：`dist/rsync.mp4`、`dist/find.mp4`…，所以 `dist/` 會逐支累積成品。
-`intermediate/` 是 per-build 的暫存（每次渲染會覆蓋 `terminal.mp4` 等），旁白快取則依
-slug 分開（`intermediate/audio/<slug>.mp3`），切 lesson 不會互相污染。
+每支 lesson 的暫存放在**自己的** `intermediate/<slug>/`（terminal.mp4 / demo.tape /
+timeline.json / audio / demo env 全在裡面），所以多支可以**同時並行渲染**互不干擾，
+也不會像舊版共用 `intermediate/` 那樣被下一支覆蓋。
 
 > 這個 `clip/` 是**共用 render 引擎**。專案根目錄的 `/clip` 動態 workflow
 > （`.claude/workflows/clip.js`）會讀 `material/` 或 `/clip <指示>`，在此新增一支
@@ -59,12 +61,13 @@ slug 分開（`intermediate/audio/<slug>.mp3`），切 lesson 不會互相污染
 # 0) 一次性：建 venv（側欄繪圖）
 uv venv .venv && uv pip install --python .venv/bin/python pillow numpy
 
-# 1) 旁白 + tape + 時間軸（旁白以 edge-tts 合成並快取於 intermediate/audio/<slug>.mp3）
+# 1) 旁白 + tape + 時間軸（寫到 intermediate/<active>/，旁白快取 audio/）
 python3 src/build.py
 
-# 2) 重置 active lesson 的環境，渲染終端（tape 用相對路徑，從 intermediate 跑）
-bash src/setup_dirs.sh                         # → 跑 lessons/<active>/setup.sh
-( cd intermediate && vhs demo.tape )           # → intermediate/terminal.mp4
+# 2) 重置環境 + 渲染終端（工作區 = intermediate/<active>/，可多 slug 並行）
+bash src/setup_dirs.sh                          # → intermediate/<active>/ 的 demo env
+( cd intermediate/<active> && vhs demo.tape )   # → intermediate/<active>/terminal.mp4
+# （明確指定或並行時，每步前面加 LESSON=<slug>，例如 LESSON=jq python3 src/build.py …）
 
 # 3) 合成側欄 + 轉場 + 淡入淡出，輸出成品（檔名依 slug）
 .venv/bin/python src/overlay.py                # → dist/<slug>.mp4 + .srt
