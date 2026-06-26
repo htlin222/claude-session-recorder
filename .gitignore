@@ -1,14 +1,28 @@
-# python venv (recreate: uv venv .venv && uv pip install pillow numpy)
+# ── envs & caches ────────────────────────────────────────────────
+# python venv (recreate: cd clip && uv venv .venv && uv pip install --python .venv/bin/python pillow numpy)
 clip/.venv/
-
-# regenerable working dirs + ffmpeg intermediates
-clip/intermediate/A/
-clip/intermediate/B/
-clip/intermediate/C/
-clip/intermediate/_*
-clip/intermediate/*.mp4.txt
-clip/intermediate/rsync-demo.mp4
-
-# misc
-.DS_Store
 __pycache__/
+*.pyc
+.DS_Store
+
+# ── regenerable scratch ──────────────────────────────────────────
+# clip/intermediate/ is SHARED, disposable build scratch (overwritten every
+# render); clip/dist/ is engine output staging. Both regenerate from the
+# pipeline — the durable record of a finished clip lives in <slug>/build/.
+clip/intermediate/
+clip/dist/
+
+# local backup snapshot (manual `cp`, not source)
+clip_rsync/
+
+# ── generated media ──────────────────────────────────────────────
+# Heavy binaries regenerate from clip/lessons/<slug>/ via /clip or the pipeline.
+# Product folders keep their TEXT record in git (manifest.md and
+# build/{timeline,sync_report,jcut_report,verify}.json, build/config.toml,
+# build/demo.tape, build/lesson/, build/PROVENANCE.md); the video/audio/player
+# and raw logs are not committed.
+*.mp4
+*.mp3
+*.srt
+*.html
+*.log
