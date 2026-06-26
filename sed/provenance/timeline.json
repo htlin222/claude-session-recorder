@@ -1,0 +1,751 @@
+{
+  "slug": "sed",
+  "title": "GNU sed 教學 · 用 gsed 串流編輯器一行改文字",
+  "predicted_total": 284.64,
+  "anchor": 1.0,
+  "mp3": "/Users/htlin/vhs-demo/clip/intermediate/sed/audio/sed.mp3",
+  "narration_dur": 282.24,
+  "cues": [
+    [
+      0.1,
+      6.787,
+      "sed 是 Linux 上標準的串流編輯器，能在管線裡一行指令就把文字改好。"
+    ],
+    [
+      6.737,
+      12.975,
+      "不過 macOS 內建的是 BSD 版本的 sed，行為跟 Linux 並不完全一樣。"
+    ],
+    [
+      12.975,
+      19.637,
+      "像單字邊界這類寫法，BSD sed 並不支援，輸出會跟教材對不上。"
+    ],
+    [
+      19.637,
+      26.0,
+      "所以這堂課全程改用 gsed，請先用 brew install gnu-sed 把它裝起來。"
+    ],
+    [
+      26.0,
+      30.325,
+      "我們先看看待會兒要操作的範例檔 notes.txt。"
+    ],
+    [
+      30.325,
+      36.825,
+      "裡面有重複的 red、大小寫混合的 green、兩個日期，還有一行 TODO。"
+    ],
+    [
+      36.825,
+      41.725,
+      "第一招，也是最核心的，就是用取代指令改字。"
+    ],
+    [
+      41.725,
+      48.712,
+      "我們用 gsed 執行 s/red/blue/，把每行第一個出現的 red 換成 blue。"
+    ],
+    [
+      48.712,
+      54.175,
+      "注意每一行只有第一個 red 被換掉，後面重複的 red 還留著。"
+    ],
+    [
+      54.175,
+      59.1,
+      "這就是 s 取代的預設行為，逐行而且只動第一個。"
+    ],
+    [
+      59.1,
+      63.625,
+      "剛剛只換第一個，那如果想換整行所有的呢？"
+    ],
+    [
+      63.625,
+      69.5,
+      "在 gsed 的取代結尾補上 /g 旗標，就會變成全域取代。"
+    ],
+    [
+      69.5,
+      73.862,
+      "這一次，那行裡的每個 red 都一起變成 blue 了。"
+    ],
+    [
+      73.862,
+      78.825,
+      "這個 /g 代表 global，是 sed 裡最常用的旗標之一。"
+    ],
+    [
+      78.825,
+      83.887,
+      "我們檔案裡的 green，有 green、Green、GREEN 三種大小寫。"
+    ],
+    [
+      83.887,
+      90.65,
+      "用 gsed 取代時加上 /g 全域，再補一個 I 旗標就會忽略大小寫。"
+    ],
+    [
+      90.65,
+      95.037,
+      "三種大小寫的 green，整行通通被換成了 lime。"
+    ],
+    [
+      95.037,
+      99.487,
+      "有了 I 這個旗標，比對時就不必再管大小寫。"
+    ],
+    [
+      99.487,
+      104.412,
+      "取代的時候，常常想把原本比對到的字一起留著。"
+    ],
+    [
+      104.412,
+      110.375,
+      "在 gsed 的替換字串裡，用 & 就能代表剛剛比對到的整段內容。"
+    ],
+    [
+      110.375,
+      115.275,
+      "你看，原本的 cat 被保留，外面多了一對中括號。"
+    ],
+    [
+      115.275,
+      120.037,
+      "有了 & 這個符號，就不必把比對到的字再重打一次。"
+    ],
+    [
+      120.037,
+      123.587,
+      "接下來進入正則表達式的世界。"
+    ],
+    [
+      123.587,
+      129.925,
+      "gsed 預設的正則比較陽春，分組和選擇都得加跳脫很麻煩。"
+    ],
+    [
+      129.925,
+      137.15,
+      "加上 -E 啟用擴充正則，括號和直線就能直接寫，把 cat 或 dog 都換成 pet。"
+    ],
+    [
+      137.15,
+      141.925,
+      "一個 cat、一個 dog，都被這個樣式抓到換成了 pet。"
+    ],
+    [
+      141.925,
+      146.55,
+      "擴充正則還有一個殺手鐧，叫做反向參照。"
+    ],
+    [
+      146.55,
+      152.687,
+      "我們用 gsed -E 先把日期的三段數字，各自用括號分成一組。"
+    ],
+    [
+      152.687,
+      159.125,
+      "接著在替換字串用 \\1 引用第一組，再把三組數字對調順序。"
+    ],
+    [
+      159.125,
+      164.212,
+      "原本年、月、日的順序，就這樣被對調重組了。"
+    ],
+    [
+      164.212,
+      168.937,
+      "還記得剛剛 category 裡面的 cat，也一起被換掉了嗎？"
+    ],
+    [
+      168.937,
+      176.712,
+      "這次用 gsed 搭配 GNU 專屬的 \\b 單字邊界，把樣式寫成 \\bcat\\b。"
+    ],
+    [
+      176.712,
+      182.312,
+      "再加上 /g 全域取代，category 裡的 cat 就不會被波及。"
+    ],
+    [
+      182.312,
+      187.2,
+      "只有獨立的單字 cat 變成了 fish，category 完好無缺。"
+    ],
+    [
+      187.2,
+      191.875,
+      "到目前為止，gsed 都會把每一行都印出來。"
+    ],
+    [
+      191.875,
+      197.875,
+      "如果只想看特定幾行，就先用 -n 安靜模式關掉自動輸出。"
+    ],
+    [
+      197.875,
+      202.437,
+      "再用 p 指令，只把符合 date 的那幾行印出來。"
+    ],
+    [
+      202.437,
+      207.062,
+      "整個檔案裡，只有提到 date 的那兩行被留了下來。"
+    ],
+    [
+      207.062,
+      213.275,
+      "除了用樣式比對，行號本身也可以當位址，直接點名某一行。"
+    ],
+    [
+      213.275,
+      218.8,
+      "我們一樣用 gsed -n 關掉自動輸出，再指定位址 2p。"
+    ],
+    [
+      218.8,
+      223.25,
+      "這裡的 2p 意思就是，只把第 2 行印出來。"
+    ],
+    [
+      223.25,
+      226.525,
+      "畫面準確地只留下了第 2 行。"
+    ],
+    [
+      226.525,
+      230.55,
+      "單一行號可以點名，那連續一整段呢？"
+    ],
+    [
+      230.55,
+      235.825,
+      "把位址寫成 2,4p，用逗號就能表示一個範圍。"
+    ],
+    [
+      235.825,
+      241.987,
+      "我們再用 gsed -n 搭配這個範圍位址，一次取出中間那幾行。"
+    ],
+    [
+      241.987,
+      246.75,
+      "第 2、第 3、第 4 行，連續被印了出來。"
+    ],
+    [
+      246.75,
+      251.562,
+      "最後一招會真的移除內容，所以放在最後示範。"
+    ],
+    [
+      251.562,
+      257.637,
+      "我們用 gsed 配上位址，再接一個 d 指令，刪掉符合的整行。"
+    ],
+    [
+      257.637,
+      262.312,
+      "這次比對含有 TODO 的那一行，把它整行刪除。"
+    ],
+    [
+      262.312,
+      266.95,
+      "輸出裡那行 TODO 不見了，其餘內容原封不動。"
+    ],
+    [
+      266.95,
+      275.137,
+      "提醒一下，這裡只是把結果印到畫面，要加上 -i 才會真的寫回檔案，請務必小心。"
+    ],
+    [
+      275.137,
+      282.187,
+      "這一連串情境走完，你已經能用 gsed 一行指令搞定大部分的文字處理了。"
+    ]
+  ],
+  "panels": [
+    {
+      "banner": 1.0,
+      "key": "sed 是什麼？Linux 用 sed，macOS 請用 gsed",
+      "hero": null,
+      "cmd": null,
+      "cmd_start": null,
+      "tokens": [],
+      "show_to": 37.825
+    },
+    {
+      "banner": 37.825,
+      "key": "s/old/new/ 取代每行第一個符合",
+      "hero": "cat notes.txt | gsed 's/red/blue/'",
+      "cmd": "cat notes.txt | gsed 's/red/blue/'",
+      "cmd_start": 42.725,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀出檔案，用管線送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 44.472
+        },
+        {
+          "label": "gsed",
+          "ann": "在 macOS 用 gsed 等於 GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 44.872
+        },
+        {
+          "label": "s/red/blue/",
+          "ann": "取代指令：把每行第一個 red 換成 blue",
+          "role": "star",
+          "cs": 22,
+          "ce": 33,
+          "reveal": 45.272
+        }
+      ],
+      "show_to": 60.1
+    },
+    {
+      "banner": 60.1,
+      "key": "/g 全域旗標，整行全部取代",
+      "hero": "cat notes.txt | gsed 's/red/blue/g'",
+      "cmd": "cat notes.txt | gsed 's/red/blue/g'",
+      "cmd_start": 64.625,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 65.8
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 66.2
+        },
+        {
+          "label": "s/red/blue",
+          "ann": "一樣是把 red 換成 blue",
+          "role": "path",
+          "cs": 22,
+          "ce": 32,
+          "reveal": 68.15
+        },
+        {
+          "label": "/g",
+          "ann": "全域旗標，整行每個都換",
+          "role": "star",
+          "cs": 32,
+          "ce": 34,
+          "reveal": 68.55
+        }
+      ],
+      "show_to": 79.825
+    },
+    {
+      "banner": 79.825,
+      "key": "s///I 比對時忽略大小寫",
+      "hero": "cat notes.txt | gsed 's/green/lime/gI'",
+      "cmd": "cat notes.txt | gsed 's/green/lime/gI'",
+      "cmd_start": 84.887,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 86.24
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 86.64
+        },
+        {
+          "label": "/g",
+          "ann": "全域取代",
+          "role": "ord",
+          "cs": 23,
+          "ce": 25,
+          "reveal": 87.329
+        },
+        {
+          "label": "I",
+          "ann": "I 旗標：比對時忽略大小寫",
+          "role": "star",
+          "cs": 36,
+          "ce": 37,
+          "reveal": 89.396
+        }
+      ],
+      "show_to": 100.487
+    },
+    {
+      "banner": 100.487,
+      "key": "& 在替換裡引用整段匹配",
+      "hero": "cat notes.txt | gsed 's/cat/[&]/'",
+      "cmd": "cat notes.txt | gsed 's/cat/[&]/'",
+      "cmd_start": 105.412,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 106.605
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 107.005
+        },
+        {
+          "label": "s/cat/",
+          "ann": "比對到 cat 這個字",
+          "role": "path",
+          "cs": 22,
+          "ce": 28,
+          "reveal": 108.99
+        },
+        {
+          "label": "&",
+          "ann": "在替換字串裡代表整段匹配",
+          "role": "star",
+          "cs": 29,
+          "ce": 30,
+          "reveal": 109.39
+        }
+      ],
+      "show_to": 121.037
+    },
+    {
+      "banner": 121.037,
+      "key": "-E 啟用擴充正則表達式",
+      "hero": "cat notes.txt | gsed -E 's/(cat|dog)/pet/g'",
+      "cmd": "cat notes.txt | gsed -E 's/(cat|dog)/pet/g'",
+      "cmd_start": 130.925,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 132.37
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 133.815
+        },
+        {
+          "label": "-E",
+          "ann": "啟用擴充正則，括號與直線免跳脫",
+          "role": "star",
+          "cs": 21,
+          "ce": 23,
+          "reveal": 134.215
+        },
+        {
+          "label": "(cat|dog)",
+          "ann": "cat 或 dog 都算符合",
+          "role": "path",
+          "cs": 27,
+          "ce": 36,
+          "reveal": 136.705
+        }
+      ],
+      "show_to": 142.925
+    },
+    {
+      "banner": 142.925,
+      "key": "\\1 反向參照括號抓到的內容",
+      "hero": "cat notes.txt | gsed -E 's/([0-9]+)-([0-9]+)-([0-9]+)/\\3\\2\\1/'",
+      "cmd": "cat notes.txt | gsed -E 's/([0-9]+)-([0-9]+)-([0-9]+)/\\3\\2\\1/'",
+      "cmd_start": 153.687,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 154.76
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 155.833
+        },
+        {
+          "label": "-E",
+          "ann": "擴充正則才好分組",
+          "role": "ord",
+          "cs": 21,
+          "ce": 23,
+          "reveal": 156.906
+        },
+        {
+          "label": "([0-9]+)",
+          "ann": "用括號抓出一段數字",
+          "role": "path",
+          "cs": 27,
+          "ce": 35,
+          "reveal": 157.979
+        },
+        {
+          "label": "\\1",
+          "ann": "反向參照：引用第一組括號的內容",
+          "role": "star",
+          "cs": 58,
+          "ce": 60,
+          "reveal": 158.579
+        }
+      ],
+      "show_to": 165.212
+    },
+    {
+      "banner": 165.212,
+      "key": "\\b 整字比對（GNU 專屬，BSD 不支援）",
+      "hero": "cat notes.txt | gsed 's/\\bcat\\b/fish/g'",
+      "cmd": "cat notes.txt | gsed 's/\\bcat\\b/fish/g'",
+      "cmd_start": 177.712,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 178.832
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 179.952
+        },
+        {
+          "label": "\\bcat\\b",
+          "ann": "用 \\b 框住，只比對獨立的單字 cat",
+          "role": "star",
+          "cs": 24,
+          "ce": 31,
+          "reveal": 181.072
+        },
+        {
+          "label": "/g",
+          "ann": "全域取代",
+          "role": "ord",
+          "cs": 36,
+          "ce": 38,
+          "reveal": 181.472
+        }
+      ],
+      "show_to": 188.2
+    },
+    {
+      "banner": 188.2,
+      "key": "-n 搭配 p 只印需要的行",
+      "hero": "cat notes.txt | gsed -n '/date/p'",
+      "cmd": "cat notes.txt | gsed -n '/date/p'",
+      "cmd_start": 198.875,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 199.635
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 200.396
+        },
+        {
+          "label": "-n",
+          "ann": "安靜模式，關掉每行自動印出",
+          "role": "star",
+          "cs": 21,
+          "ce": 23,
+          "reveal": 201.156
+        },
+        {
+          "label": "/date/",
+          "ann": "只在符合 date 的行",
+          "role": "path",
+          "cs": 25,
+          "ce": 31,
+          "reveal": 201.916
+        },
+        {
+          "label": "p",
+          "ann": "p 指令：把這行印出來",
+          "role": "star",
+          "cs": 31,
+          "ce": 32,
+          "reveal": 202.316
+        }
+      ],
+      "show_to": 208.062
+    },
+    {
+      "banner": 208.062,
+      "key": "2p 用單行位址點名某一行",
+      "hero": "cat notes.txt | gsed -n '2p'",
+      "cmd": "cat notes.txt | gsed -n '2p'",
+      "cmd_start": 219.8,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 220.69
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 221.58
+        },
+        {
+          "label": "-n",
+          "ann": "安靜模式",
+          "role": "ord",
+          "cs": 21,
+          "ce": 23,
+          "reveal": 222.47
+        },
+        {
+          "label": "2p",
+          "ann": "行號位址：只印第 2 行",
+          "role": "star",
+          "cs": 25,
+          "ce": 27,
+          "reveal": 222.87
+        }
+      ],
+      "show_to": 227.525
+    },
+    {
+      "banner": 227.525,
+      "key": "2,4p 用範圍位址取一段",
+      "hero": "cat notes.txt | gsed -n '2,4p'",
+      "cmd": "cat notes.txt | gsed -n '2,4p'",
+      "cmd_start": 236.825,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 238.057
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 238.457
+        },
+        {
+          "label": "-n",
+          "ann": "安靜模式",
+          "role": "ord",
+          "cs": 21,
+          "ce": 23,
+          "reveal": 238.857
+        },
+        {
+          "label": "2,4p",
+          "ann": "範圍位址：第 2 到第 4 行都印",
+          "role": "star",
+          "cs": 25,
+          "ce": 29,
+          "reveal": 241.755
+        }
+      ],
+      "show_to": 247.75
+    },
+    {
+      "banner": 247.75,
+      "key": "d 刪除符合的整行（會移除內容，最後示範）",
+      "hero": "cat notes.txt | gsed '/TODO/d'",
+      "cmd": "cat notes.txt | gsed '/TODO/d'",
+      "cmd_start": 258.637,
+      "tokens": [
+        {
+          "label": "cat notes.txt",
+          "ann": "讀檔送進 gsed",
+          "role": "path",
+          "cs": 0,
+          "ce": 13,
+          "reveal": 259.572
+        },
+        {
+          "label": "gsed",
+          "ann": "GNU sed",
+          "role": "ord",
+          "cs": 16,
+          "ce": 20,
+          "reveal": 260.507
+        },
+        {
+          "label": "/TODO/",
+          "ann": "位址：符合 TODO 的行",
+          "role": "path",
+          "cs": 22,
+          "ce": 28,
+          "reveal": 261.442
+        },
+        {
+          "label": "d",
+          "ann": "d 指令：把整行從輸出刪掉",
+          "role": "star",
+          "cs": 28,
+          "ce": 29,
+          "reveal": 262.377
+        }
+      ],
+      "show_to": 284.64
+    }
+  ]
+}
