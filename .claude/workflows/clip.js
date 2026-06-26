@@ -4,6 +4,7 @@ export const meta = {
   whenToUse: 'Produce a narrated CLI teaching video. Reads ./material/ and/or the /clip <instruction> arg, authors a lesson under clip/lessons/<slug>/, renders via the clip/ engine, copies the finished mp4/srt/html into ./<slug>/.',
   phases: [
     { title: 'Design', detail: 'read material + instruction, plan a ~5 min lesson' },
+    { title: 'EnvCheck', detail: 'deterministically probe the lesson tools (GNU vs BSD, present?)' },
     { title: 'Author', detail: 'write the lesson, run build, fit duration to 4–6 min (loop)' },
     { title: 'Render', detail: 'setup env, vhs the terminal, overlay panel + transitions' },
     { title: 'Verify', detail: 'check A/V sync; auto-heal desync via guided clears (loop)' },
@@ -91,13 +92,17 @@ block is ~23s and a sentence ~5s. The exact per-run TARGET WINDOW is given below
 
 const PLAN = {
   type: 'object', additionalProperties: false,
-  required: ['slug', 'title', 'audience', 'topic_summary', 'scenes', 'target_minutes'],
+  required: ['slug', 'title', 'audience', 'topic_summary', 'scenes', 'target_minutes', 'tools'],
   properties: {
     slug: { type: 'string', description: 'kebab-case, e.g. "git-rebase"' },
     title: { type: 'string' },
     audience: { type: 'string' },
     topic_summary: { type: 'string', description: 'what the clip teaches + where it came from (material vs instruction)' },
     target_minutes: { type: 'number' },
+    tools: {
+      type: 'array', items: { type: 'string' },
+      description: 'every CLI executable the hero commands invoke (PRIMARY tool first, then helpers like tree/head), so the environment can be probed before authoring',
+    },
     scenes: {
       type: 'array',
       description: 'ordered scenes incl. optional intro; aim 12–16 command scenes for ~5 min',
@@ -108,6 +113,28 @@ const PLAN = {
           key: { type: 'string', description: 'panel headline (zh-TW)' },
           hero: { type: 'string', description: 'command, or "" for an intro/tour scene' },
           teaches: { type: 'string', description: 'the key flag/idea (the star token)' },
+        },
+      },
+    },
+  },
+}
+
+const ENV = {
+  type: 'object', additionalProperties: false,
+  required: ['tools'],
+  properties: {
+    tools: {
+      type: 'array',
+      description: 'the ENV_JSON array printed by envcheck.py, verbatim',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['cmd', 'present', 'flavor', 'gnu_alt', 'recommend'],
+        properties: {
+          cmd: { type: 'string' },
+          present: { type: 'boolean' },
+          flavor: { type: 'string', description: 'gnu | bsd | busybox | other | missing' },
+          gnu_alt: { type: ['string', 'null'], description: 'GNU drop-in to use instead (e.g. gsed), or null' },
+          recommend: { type: 'string' },
         },
       },
     },
@@ -208,12 +235,45 @@ ${DUR}
 Produce a lesson PLAN for that length. Choose a kebab-case slug. Each scene teaches
 ONE key flag/idea (the future "star" token). Order scenes from simplest/safest to
 most advanced; put any destructive command late and flag it. Set target_minutes to
-${targetMin}. Do NOT write files yet — just the plan.
+${targetMin}. In the tools field, list every CLI executable your hero commands invoke
+— the PRIMARY tool (the one being taught) FIRST, then helpers (cat/printf/tree/head…)
+— so the environment is probed before authoring. Do NOT write files yet — just the plan.
 `.trim(), { schema: PLAN, phase: 'Design', label: 'design lesson' })
 
 if (!plan) return { ok: false, stage: 'Design', error: 'design agent returned nothing' }
 const slug = plan.slug
 log(`designed "${slug}" — ${plan.scenes.length} scenes, target ${plan.target_minutes}min`)
+
+// ---------------------------------------------------------------- EnvCheck
+// Deterministically probe the lesson's tools BEFORE authoring, so the choice of
+// `sed` vs `gsed` (etc.) is fact-driven, not guessed from the model's memory.
+phase('EnvCheck')
+const toolList = (plan.tools && plan.tools.length ? plan.tools : [slug]).join(' ')
+const env = await agent(`
+Run this deterministic environment probe and return its result, nothing else:
+  ( cd clip && python3 src/envcheck.py ${toolList} )
+It prints aligned human lines and one machine line beginning "ENV_JSON " with a
+JSON array. Parse that array and return it verbatim as \`tools\`. Do not edit,
+re-order, or editorialize the values.
+`.trim(), { schema: ENV, phase: 'EnvCheck', label: `envcheck ${slug}` })
+
+const envTools = (env && env.tools) || []
+const primary = envTools[0]
+if (primary && primary.present === false) {
+  return { ok: false, stage: 'EnvCheck', slug,
+           error: `primary tool '${primary.cmd}' is not installed — cannot render` }
+}
+const swaps = envTools.filter(t => t.gnu_alt)
+const envNote = envTools.length
+  ? `ENVIRONMENT (deterministic probe — OBEY it over any prior assumption):\n`
+    + envTools.map(t => `  ${t.cmd}: ${t.recommend}`).join('\n')
+    + (swaps.length
+        ? `\nMANDATORY: for each tool with a GNU alternative above, every R() command MUST `
+          + `call that alternative (${swaps.map(t => `${t.gnu_alt} not ${t.cmd}`).join(', ')}) `
+          + `and the intro MUST note the Linux/macOS split (on Linux it's the bare name).`
+        : `\nAll tools match Linux/GNU or are uniform — use them as-is.`)
+  : ''
+log(`envcheck ${slug}: ${swaps.length ? 'GNU swaps -> ' + swaps.map(t => `${t.cmd}=>${t.gnu_alt}`).join(',') : 'all uniform/GNU'}`)
 
 // ---------------------------------------------------------------- Author + fit loop
 phase('Author')
@@ -231,6 +291,8 @@ lands in ${LO}–${HI} seconds.
 ${ENGINE}
 
 ${DUR}
+
+${envNote}
 
 PLAN (from the design phase):
 ${JSON.stringify(plan, null, 2)}

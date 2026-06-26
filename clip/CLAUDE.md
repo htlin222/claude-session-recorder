@@ -20,6 +20,7 @@ clip/
     overlay.py         # 合成側欄、場景轉場（含轉場 J-cut）、開場/結尾淡出；依 slug 命名
     verify_sync.py     # 畫音同步的可測訊號：結構同步/旁白沒切/時長/J-cut，可自癒 desync
     bundle.py          # 把一次 render 的 provenance 凍進 <slug>/provenance/（intermediate 會被覆蓋）
+    envcheck.py        # 確定性環境探測：工具在不在、是 GNU 還是 BSD/variant、有沒有 g* 替代
     setup_dirs.sh      # dispatcher：讀 config 的 active，跑該 lesson 的 setup.sh
     compose.py         # legacy：只在 clear 偵測失敗的 fallback 用到
   lessons/             # 內容（要改的都在這）
