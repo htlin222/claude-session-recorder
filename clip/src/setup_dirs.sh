@@ -1,40 +1,21 @@
 #!/usr/bin/env bash
-# (Re)create the demo source/dest folders in their INITIAL state.
+# Dispatcher: run the ACTIVE lesson's setup.sh (lessons/<active>/setup.sh),
+# which (re)creates that lesson's demo environment in intermediate/. The active
+# lesson is read from config.toml ([lesson] active); defaults to rsync.
 # Re-run this right before every `vhs demo.tape` render.
 set -euo pipefail
-DEMO="$(cd "$(dirname "$0")/../intermediate" && pwd)"
-cd "$DEMO"
+SRC="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$SRC/.." && pwd)"
 
-rm -rf A B C
+# $LESSON env wins (matches build.py / the /clip workflow); else read config.
+ACTIVE="${LESSON:-$(python3 - "$ROOT/config.toml" <<'PY'
+import sys, tomllib
+cfg = tomllib.load(open(sys.argv[1], "rb"))
+print(cfg.get("lesson", {}).get("active", "rsync"))
+PY
+)}"
 
-# ---- Source folder A (a small "project") ----
-mkdir -p A/src A/docs A/data A/.cache A/logs
-cat > A/README.md <<'X'
-# MyProject
-The single source of truth.
-X
-printf 'print("hello from app")\n'      > A/src/app.py
-printf 'def helper(): return 42\n'       > A/src/utils.py
-cat > A/docs/guide.md <<'X'
-# Guide
-Step 1. Read.
-Step 2. Sync.
-X
-printf 'name: myproject\nversion: 2\n'  > A/config.yaml
-# a 6 MB binary so -z / --progress are meaningful
-head -c 6000000 /dev/urandom            > A/data/archive.bin
-# noise we will later EXCLUDE
-printf 'cached junk\n'                   > A/.cache/build.cache
-printf '[INFO] build ok\n'               > A/logs/debug.log
-
-# ---- Dest folder B (already exists, slightly out of date) ----
-mkdir -p B/src
-cat > B/README.md <<'X'
-# MyProject (OLD)
-outdated copy
-X
-printf 'print("OLD app")\n'              > B/src/app.py
-# a stale file that does NOT exist in A (mirror/--delete will remove it)
-printf 'last year notes\n'               > B/obsolete.txt
-
-echo "reset done."
+SETUP="$ROOT/lessons/$ACTIVE/setup.sh"
+[ -f "$SETUP" ] || { echo "no setup.sh for lesson '$ACTIVE' ($SETUP)" >&2; exit 1; }
+echo "setup: lesson '$ACTIVE'"
+exec bash "$SETUP"

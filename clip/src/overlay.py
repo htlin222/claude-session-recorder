@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clip/
 DEMO = f"{ROOT}/intermediate"
 DIST = f"{ROOT}/dist"
-FINAL = f"{DIST}/rsync-demo-final.mp4"
+TERMINAL = f"{DEMO}/terminal.mp4"     # tool-agnostic VHS render (left pane)
 PDIR = f"{DEMO}/_panels"
 FF = "/opt/homebrew/bin/ffmpeg"
 _T = tomllib.load(open(f"{ROOT}/config.toml", "rb"))["timing"]
@@ -51,6 +51,8 @@ FADEOUT = _T["fade_out"]
 HOLD = _T["hold"]
 XF = _T["xfade"]
 SAFETY = _T["safety"]
+JCUT = _T.get("jcut_lead", 0.35)     # transition J-cut: incoming voice leads video
+GUARD = _T.get("jcut_guard", 0.12)   # silence kept after a scene's last word
 INNER = PANEL_W - 2 * PAD
 _d = ImageDraw.Draw(Image.new("RGBA", (4, 4)))
 CMD_F = ImageFont.truetype(MONO, CMD_SIZE)
@@ -170,21 +172,55 @@ def concat_video(segs, out):
                    check=True, capture_output=True)
 
 
-def detect_clears(video):
-    """Find the real frame-times where the terminal clears (content -> empty).
-    These are deterministic visual anchors: the panel banner is pinned to them
-    so left and right switch on the SAME frame (no predicted-clock residual)."""
-    sw, sh, fps = 200, 180, 12.5
+FPS = 12.5
+
+
+def _clear_signal(video):
+    """Per-frame bright-pixel count of the terminal (high=full screen, low=empty)."""
+    sw, sh = 200, 180
     raw = subprocess.run([FF, "-i", video, "-vf",
-                          f"scale={sw}:{sh},format=gray,fps={fps}",
+                          f"scale={sw}:{sh},format=gray,fps={FPS}",
                           "-f", "rawvideo", "-"], capture_output=True).stdout
     n = len(raw) // (sw * sh)
     f = np.frombuffer(raw, np.uint8)[:n*sw*sh].reshape(n, sh, sw)
-    content = (f > 90).sum(axis=(1, 2)).astype(float)
+    return (f > 90).sum(axis=(1, 2)).astype(float)
+
+
+def detect_clears(video, predicted=None, expected=None):
+    """Find the real frame-times where the terminal clears (content -> empty).
+    These are deterministic visual anchors: the panel banner is pinned to them
+    so left and right switch on the SAME frame (no predicted-clock residual).
+
+    Blind brightness-threshold detection works when each scene fills the screen.
+    Sparse-output lessons (e.g. `fzf -f` prints 1-3 lines) dip near-empty
+    mid-scene, so the blind pass over-counts. When the count is wrong AND we know
+    how many scenes to expect (+ their predicted clear times), fall back to
+    GUIDED selection: keep the `expected` content-drops nearest the predicted
+    per-scene clears, which ignores spurious mid-scene dips. Returns (clears,
+    method) where method is "detect" or "guided"."""
+    content = _clear_signal(video)
+    n = len(content)
     base, hi = np.percentile(content, 5), np.percentile(content, 70)
     thr = base + 0.30 * (hi - base)
     empty = content < thr
-    return [i / fps for i in range(1, n) if empty[i] and not empty[i-1]]
+    cands = [i / FPS for i in range(1, n) if empty[i] and not empty[i-1]]
+    if expected is None or len(cands) == expected:
+        return cands, "detect"
+    # guided: one clear per predicted scene-start — nearest candidate, monotonic.
+    # The real clear (full->empty) is always a candidate and sits at the scene
+    # start; spurious mid-scene dips are seconds away, so "nearest" picks reals.
+    sel, last = [], -1.0
+    for t in predicted:
+        avail = [c for c in cands if c > last + 0.05]
+        if not avail:
+            break
+        c = min(avail, key=lambda x: abs(x - t))
+        if abs(c - t) > 4.0:               # no real clear near this scene start
+            break
+        sel.append(c); last = c
+    if len(sel) == expected:
+        return sel, "guided"
+    return cands, "detect"                 # guided failed -> wrong count -> fallback
 
 
 def _dur(path):
@@ -194,58 +230,89 @@ def _dur(path):
 
 
 def transitions_av(vid, voice, vb, ab, delays):
-    """Assemble per-scene clips, freeze-hold + crossfade between them.
+    """Freeze-held, crossfaded VIDEO segments + one globally-placed narration
+    track with an adaptive J-cut at each transition.
 
-    Video is split at the visual clears (vb); audio is split at the *sentence*
-    boundaries (ab) — so the narration is NEVER cut mid-sentence. Each scene's
-    narration is re-anchored to that scene's start (delays[i]), so video, audio
-    and panel all line up at every scene boundary. Returns (out, scene_starts)."""
+    Video is split at the visual clears (vb) and xfaded — unchanged, so every
+    scene stays locked to its real terminal clear. The narration (split at
+    sentence boundaries ab, never mid-sentence) is then placed on a single track:
+    scene i's voice starts at S[i] - lead[i], i.e. its intro sentence leads its
+    own video into the SILENT HOLD that follows scene i-1's last word. lead[i] is
+    capped at JCUT and shrunk to whatever silent gap is actually available, so a
+    J-cut never talks over the previous scene. Returns (out, scene_starts, leads)."""
     n = len(vb) - 1
-    pad = HOLD + XF
-    segpaths, durs = [], []
+    segpaths, durs, Alen = [], [], []
     for i in range(n):
         # end the video a hair BEFORE the clear (Hide makes content->blank an
         # instant jump cut; without this margin the freeze grabs the blank frame)
         vend = vb[i+1] - (SAFETY if i < n - 1 else 0.0)
         L = vend - vb[i]
         A = ab[i+1] - ab[i]                            # narration length
-        # last scene: hold long enough for the narration to FINISH, then leave a
-        # HOLD+FADEOUT silent tail so the closing fade never cuts the voice.
-        end_pad = pad if i < n - 1 else max(0.0, A - L) + HOLD + FADEOUT
-        target = L + end_pad
-        dms = int(delays[i] * 1000)
+        Alen.append(A)
+        # CRITICAL: hold the still frame until THIS scene's narration has fully
+        # finished, THEN HOLD more, before the transition — so a scene's voice
+        # never bleeds into the next clip. `overrun` is how much the narration
+        # outlasts the on-screen action (delays[i] covers the intro idle); every
+        # scene thus leaves >= HOLD of silence before the next, which the J-cut
+        # leads into. The last scene also reserves FADEOUT for the closing fade.
+        overrun = max(0.0, delays[i] + A - L)
+        end_pad = overrun + HOLD + (FADEOUT if i == n - 1 else XF)
         seg = f"{DEMO}/_seg{i}.mp4"
-        fc = [f"[1:a]adelay={dms}|{dms},apad=whole_dur={target:.3f},"
-              f"atrim=end={target:.3f}[a]",
-              f"[0:v]tpad=stop_duration={end_pad:.3f}:stop_mode=clone[v]"]
-        vmap = "[v]"
         subprocess.run(
             [FF, "-y", "-ss", f"{vb[i]:.3f}", "-to", f"{vend:.3f}", "-i", vid,
-             "-ss", f"{ab[i]:.3f}", "-to", f"{ab[i+1]:.3f}", "-i", voice,
-             "-filter_complex", ";".join(fc), "-map", vmap, "-map", "[a]",
-             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
-             "-c:a", "aac", "-b:a", "160k", seg],
-            check=True, capture_output=True)
+             "-filter_complex",
+             f"[0:v]tpad=stop_duration={end_pad:.3f}:stop_mode=clone[v]",
+             "-map", "[v]", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+             "-crf", "20", "-an", seg], check=True, capture_output=True)
         segpaths.append(seg); durs.append(_dur(seg))
-    cmd = [FF, "-y"]
-    for p in segpaths:
-        cmd += ["-i", p]
-    vf, af, pv, pa, cum = [], [], "[0:v]", "[0:a]", durs[0]
-    for k in range(1, n):
-        vo, ao = f"[v{k}]", f"[a{k}]"
-        vf.append(f"{pv}[{k}:v]xfade=transition=fade:duration={XF}:"
-                  f"offset={cum - XF:.3f}{vo}")
-        af.append(f"{pa}[{k}:a]acrossfade=d={XF}{ao}")
-        pv, pa, cum = vo, ao, cum + durs[k] - XF
-    out = f"{DEMO}/_trans.mp4"
-    subprocess.run(cmd + ["-filter_complex", ";".join(vf + af),
-                          "-map", pv, "-map", pa, "-c:v", "libx264",
-                          "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "aac",
-                          "-b:a", "160k", out], check=True, capture_output=True)
+    # scene starts on the xfade-overlapped timeline
     S = [0.0]
     for i in range(1, n):
         S.append(S[-1] + durs[i-1] - XF)
-    return out, S
+    # adaptive J-cut lead: pull scene i's intro voice into the silent gap left
+    # after scene i-1 stops talking; never into scene i-1's narration.
+    leads = [0.0]
+    for i in range(1, n):
+        prev_end = S[i-1] + delays[i-1] + Alen[i-1]    # scene i-1 stops talking
+        gap = (S[i] + delays[i]) - prev_end            # silent hold before scene i
+        leads.append(round(min(JCUT, max(0.0, gap - GUARD)), 3))
+    total = S[-1] + durs[-1]
+    # video: xfade-chain the (audio-less) segments
+    cmd = [FF, "-y"]
+    for p in segpaths:
+        cmd += ["-i", p]
+    vf, pv, cum = [], "[0:v]", durs[0]
+    for k in range(1, n):
+        vo = f"[v{k}]"
+        vf.append(f"{pv}[{k}:v]xfade=transition=fade:duration={XF}:"
+                  f"offset={cum - XF:.3f}{vo}")
+        pv, cum = vo, cum + durs[k] - XF
+    # audio: place each scene's narration slice at S[i]+delays[i]-lead[i] and sum
+    # (slices never overlap each other, so a straight non-normalised mix is clean)
+    cmd += ["-i", voice]
+    vix = n                                            # voice is input n
+    af, labs = [], []
+    for i in range(n):
+        onset = max(0.0, S[i] + delays[i] - leads[i])
+        dms = int(round(onset * 1000))
+        af.append(f"[{vix}:a]atrim={ab[i]:.3f}:{ab[i+1]:.3f},asetpts=PTS-STARTPTS,"
+                  f"adelay={dms}|{dms}[s{i}]")
+        labs.append(f"[s{i}]")
+    af.append("".join(labs) + f"amix=inputs={n}:normalize=0:dropout_transition=0,"
+              f"apad=whole_dur={total:.3f},atrim=end={total:.3f}[a]")
+    out = f"{DEMO}/_trans.mp4"
+    subprocess.run(cmd + ["-filter_complex", ";".join(vf + af),
+                          "-map", pv, "-map", "[a]", "-c:v", "libx264",
+                          "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "aac",
+                          "-b:a", "160k", out], check=True, capture_output=True)
+    # J-cut report for verify_sync: per-transition lead + the gap it had to work
+    # with, so the loop can confirm no narration was talked over.
+    trans = [dict(scene=i, lead=leads[i],
+                  gap=round((S[i] + delays[i]) - (S[i-1] + delays[i-1] + Alen[i-1]), 3))
+             for i in range(1, n)]
+    json.dump(dict(target=JCUT, guard=GUARD, transitions=trans),
+              open(f"{DEMO}/jcut_report.json", "w"))
+    return out, S, leads
 
 
 def remap_srt(src, dst, bounds, S, off):
@@ -272,10 +339,10 @@ def remap_srt(src, dst, bounds, S, off):
     open(dst, "w", encoding="utf-8").write("\n\n".join(out) + "\n")
 
 
-def build_subs(cues, ab, S, delays, initial, intro, dst):
+def build_subs(cues, ab, S, delays, leads, initial, intro, dst):
     """Place each cue (voice-timeline) on the transitioned timeline: scene i's
-    narration starts at S[i] + delays[i], so a cue at voice-time vt lands there
-    + (vt - ab[i]). Subtitles thus follow the re-anchored per-scene audio."""
+    narration starts at S[i] + delays[i] - leads[i] (the J-cut shift), so a cue at
+    voice-time vt lands there + (vt - ab[i]). Subtitles follow the J-cut voice."""
     def fmt(s):
         h = int(s//3600); s -= h*3600; m = int(s//60); s -= m*60
         return f"{h:02d}:{m:02d}:{int(s):02d},{int(round((s-int(s))*1000)):03d}"
@@ -283,7 +350,7 @@ def build_subs(cues, ab, S, delays, initial, intro, dst):
     def tt(vt):
         i = max(j for j in range(len(ab)-1) if ab[j] <= vt)
         i = min(i, len(S)-1)
-        return S[i] + delays[i] + (vt - ab[i]) + intro
+        return S[i] + delays[i] - leads[i] + (vt - ab[i]) + intro
     out = []
     for n, (a, b, txt) in enumerate(cues, start=1):
         out.append(f"{n}\n{fmt(tt(a))} --> {fmt(tt(b))}\n{txt}")
@@ -297,9 +364,12 @@ def _save(img, path):
 def main():
     os.makedirs(PDIR, exist_ok=True)
     tl = json.load(open(f"{DEMO}/timeline.json", encoding="utf-8"))
-    total = _dur(f"{DEMO}/rsync-demo.mp4")
+    slug = tl.get("slug", "demo")          # name outputs after the lesson
+    voice = tl["mp3"]
+    final = f"{DIST}/{slug}.mp4"
+    total = _dur(TERMINAL)
     scale = total / tl["predicted_total"]
-    print(f"total={total:.1f}s scale={scale:.3f}, CPL={CPL}")
+    print(f"[{slug}] total={total:.1f}s scale={scale:.3f}, CPL={CPL}")
 
     # panel reveal times come straight from the (TS-calibrated) timeline, so
     # they track the real video per-token; JCUT pulls each token reveal a hair
@@ -308,14 +378,33 @@ def main():
     # Anchor each scene's panel to the REAL detected terminal clear, so the
     # banner switches on the exact frame the terminal clears. Within a scene,
     # token reveals keep their predicted offset (scaled) from the scene start.
-    clears = detect_clears(f"{DEMO}/rsync-demo.mp4")
-    synced = len(clears) == len(panels) - 1
+    expected = len(panels) - 1
+    # verify_sync.py may drop a clears_override.json (guided, count-correct clears)
+    # to heal a structural desync without re-running vhs. Absent in normal runs.
+    ovr = f"{DEMO}/clears_override.json"
+    if os.path.exists(ovr):
+        clears, method = json.load(open(ovr))["clears"], "override"
+        print(f"clear-sync: using {len(clears)} override clears")
+    else:
+        # predicted per-scene clear times (real terminal clock) guide recovery
+        # when blind detection miscounts on sparse-output lessons
+        predicted = [panels[i]["banner"] * scale for i in range(1, len(panels))]
+        clears, method = detect_clears(TERMINAL, predicted, expected)
+    synced = len(clears) == expected
     if synced:
         anchors = [panels[0]["banner"] * scale] + clears
-        print(f"clear-sync: detected {len(clears)} clears, anchored to terminal")
+        print(f"clear-sync: {method} {len(clears)} clears, anchored to terminal")
     else:
         anchors = [p["banner"] * scale for p in panels]
-        print(f"clear-sync: detected {len(clears)} != {len(panels)-1}, fallback")
+        print(f"clear-sync: {method} {len(clears)} != {expected}, fallback")
+    # the machine-readable sync signal verify_sync.py / the /clip loop read
+    json.dump({"slug": slug, "synced": synced, "detected": len(clears),
+               "expected": expected, "method": method},
+              open(f"{DEMO}/sync_report.json", "w"))
+    # default jcut_report so a fallback (no-transition) render never leaves a STALE
+    # report from a previous lesson; transitions_av overwrites it when synced.
+    json.dump({"target": JCUT, "guard": GUARD, "transitions": []},
+              open(f"{DEMO}/jcut_report.json", "w"))
 
     def st(pi, sec):
         return max(0.0, anchors[pi] + (sec - panels[pi]["banner"]) * scale
@@ -348,7 +437,7 @@ def main():
     # pass 1 — pad terminal to 1920 + overlay the panel (VIDEO only; audio is
     # re-attached per scene in transitions_av so it never gets cut mid-sentence)
     vid = f"{DEMO}/_vid.mp4"
-    subprocess.run([FF, "-y", "-i", f"{DEMO}/rsync-demo.mp4",
+    subprocess.run([FF, "-y", "-i", TERMINAL,
                     "-i", f"{DEMO}/_panel.mp4", "-filter_complex",
                     f"[0:v]pad={CW}:{H}:0:0:color=0x181825[bg];"
                     f"[bg][1:v]overlay={TERM_W}:0[v]", "-map", "[v]",
@@ -362,11 +451,14 @@ def main():
         ab = [0.0] + [panels[i]["banner"] - INITIAL for i in range(1, len(panels))] \
             + [tl["narration_dur"]]
         delays = [INITIAL] + [0.0] * (len(panels) - 1)   # scene1 has lead idle
-        src, S = transitions_av(vid, f"{DEMO}/audio/voice.mp3", vb, ab, delays)
-        print(f"transitions: {len(panels)} scenes, {HOLD}s hold + {XF}s xfade")
+        src, S, leads = transitions_av(vid, voice, vb, ab, delays)
+        jc = [l for l in leads if l > 0.02]
+        print(f"transitions: {len(panels)} scenes, {HOLD}s hold + {XF}s xfade, "
+              f"J-cut on {len(jc)}/{len(leads)-1} (mean {sum(jc)/len(jc):.2f}s)"
+              if jc else f"transitions: {len(panels)} scenes, no J-cut room")
     else:                                                # fallback: no transitions
         d_ms = int(INTRO * 1000)
-        subprocess.run([FF, "-y", "-i", vid, "-i", f"{DEMO}/audio/voice.mp3",
+        subprocess.run([FF, "-y", "-i", vid, "-i", voice,
                         "-filter_complex", f"[1:a]adelay={int(INITIAL*1000)}|"
                         f"{int(INITIAL*1000)}[a]", "-map", "0:v", "-map", "[a]",
                         "-c:v", "copy", "-c:a", "aac", f"{DEMO}/_core.mp4"],
@@ -386,15 +478,15 @@ def main():
                     f"d={FADEOUT}[a]",
                     "-map", "[v]", "-map", "[a]", "-c:v", "libx264",
                     "-pix_fmt", "yuv420p", "-crf", "20", "-c:a", "aac",
-                    "-b:a", "160k", FINAL], check=True, capture_output=True)
+                    "-b:a", "160k", final], check=True, capture_output=True)
 
     # sidecar subtitles (NOT burned in), built on the new per-scene timeline
-    dst = f"{DIST}/rsync-demo-final.srt"
+    dst = f"{DIST}/{slug}.srt"
     if synced:
-        build_subs(tl["cues"], ab, S, delays, INITIAL, INTRO, dst)
+        build_subs(tl["cues"], ab, S, delays, leads, INITIAL, INTRO, dst)
     else:
         shift_srt(f"{DEMO}/subs.srt", dst, INTRO)
-    print(f"wrote {FINAL} (+ sidecar, intro offset {INTRO}s)")
+    print(f"wrote {final} (+ sidecar, intro offset {INTRO}s)")
 
 
 def shift_srt(src, dst, off):

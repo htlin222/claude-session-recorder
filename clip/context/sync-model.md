@@ -43,8 +43,59 @@ v4 的命令是一次 `Type` 打完（35ms/char，~1.5s 太快）。
 讓語音、打字、側欄三者順序一致。
 解釋句要寫得夠長（~4-5s）以容納 ~3.2s 的慢打。
 
-## 可調參數（build.py）
-- `TOKEN_STEP` — 每個 token 前的停頓（慢打節奏）。
-- `OUTPUT_MIN` — Enter 後在輸出上的最小停留。
-- 解釋句長度 — 直接改 `SCRIPT` 裡那句旁白的字數。
-- `RATE` — edge-tts 語速（現 `+0%`）。
+## v6 — 轉場 J-cut 回歸（這次放對地方了）✅
+v1 的 J-cut 失敗是因為用在**場景內**（命令先跑、旁白後到，邊講邊操作對不上）。
+但 J-cut 的本命是**剪輯轉場**。v6 只在**場景交接**處加 J-cut：
+下一幕的「引入句」（在淨屏上、還沒打字）提前 ~0.35s 進來，蓋在上一幕的**靜默定格**上。
+
+關鍵：**只動音軌、不動畫面**。畫面段落仍照 `detect_clears` 釘在真實清屏幀（零殘差），
+旁白改成在**全域音軌**上逐場景擺放，每場 onset = `S[i] - lead[i]`：
+- `lead[i] = min(jcut_lead, max(0, gap_i - jcut_guard))`，
+  `gap_i` = 上一幕講完最後一句到本幕開始之間的**靜默長度**。
+- 所以 lead **自適應**：靜默夠長才給滿 0.35s，靜默太短就自動縮到 0。
+
+### ⚠️ 致命坑：上一幕旁白還沒講完，下一幕就進來了（已修）
+第一版只有「最後一幕」會等旁白講完，**中間幕用固定 hold**。於是某幕旁白比畫面動作長
+（例如開場：旁白一大段、畫面只 `tree` 一下）時，旁白會**溢出**到下一幕——使用者聽到
+「上一段還在講、下一段已經切進來」。實測 find-deep 開場 `gap = -1.58s`。
+**修法：每一幕的定格都自適應**，撐到「**自己的旁白講完**」再加 `HOLD` 才轉場：
+```
+overrun  = max(0, delays[i] + A_i - L_i)     # 旁白比畫面動作多出來的長度
+end_pad  = overrun + HOLD + (FADEOUT if 末幕 else XF)
+```
+這保證每幕轉場前 `gap_i >= HOLD`（~1.0s），旁白一定在**延長後的定格畫面上**講完，
+J-cut 再把下一幕引入句拉進這段靜默（lead 0.35s），留 ~0.65s 純停頓。`overlay.transitions_av`
+影音分離（影片 xfade 不變；音訊 `adelay+amix` 逐句擺放），回傳 `leads`；字幕同步減 `lead[i]`。
+
+實測 find-deep（14 轉場）：修前 2 幕 gap<0（旁白溢出）；修後 14/14 給滿 J-cut、
+min gap 0.99s、零溢出。
+
+### 量測與閉環（loop engineering）
+`src/verify_sync.py` 是可測訊號，gate 五件事，不過關不出片：
+1. **結構同步** — `overlay` 寫 `sync_report.json`（synced/detected/expected）。
+   `detect_clears` 盲偵測數量不對時改用 **guided**（用預測清屏時刻挑最接近的 N 個落點，
+   忽略稀疏輸出造成的場景中途假掉落）；仍不對才由 verify 掃 threshold 寫
+   `clears_override.json` 讓 overlay 重合成（不必重跑 vhs）。
+2. **旁白沒被切** — 成品長度 ≥ 旁白長度。
+3. **時長** — 5±1 分（可給 `--target-sec`/`--tol-sec`）。
+4. **J-cut 沒蓋過旁白**（`jcut_clips==0`）— 進來的 lead 沒壓到上一幕旁白。
+5. **旁白沒溢出**（`voice_overruns==0`，看 `min_gap_sec`）— 每幕的旁白都在自己的定格畫面
+   上講完、沒跑進下一段。**這條就是上面那個致命坑的守門員**：修法之前它會 FAIL
+   （`min gap -1.58s`），修法之後 PASS（`min gap 0.99s`）。
+`/clip` 的 Verify phase 跑這支、必要時自癒重合成，有界迴圈。
+
+> 教訓：bug #4 我一開始只 gate 了「進來的 J-cut 壓到舊旁白」，漏了「舊旁白溢出到新畫面」
+> ——**同一個轉場、兩個相反方向的失敗**。loop engineering 的價值不是「一次想周全」，
+> 而是**每抓到一個新失敗模式就補一道 gate**，讓它再也不會默默出片。
+
+> bug #5（fzf 測出來的）：`fzf -f` 輸出稀疏，畫面中途掉到近空，盲清屏偵測抓到 24 次
+> （實際 13 段），threshold 掃描也救不回（過數是結構性的）。Verify **誠實判 FAIL、不出
+> 假同步**，並標記成品。修法＝`detect_clears` 加 **guided**：盲數不對就用預測清屏時刻挑最
+> 接近的 N 個落點。fzf 從 FAIL（24/13、退化無轉場）變 PASS（13/13 J-cut）。
+> 又一次：測一個新題材 → 冒出新失敗模式 → 補一道能力，gate 早就在那等著它了。
+
+## 可調參數
+- build.py：`TOKEN_STEP`（慢打節奏）、`OUTPUT_MIN`（Enter 後最小停留）、`RATE`（語速）、
+  解釋句長度（改 `SCRIPT` 字數）。
+- config.toml `[timing]`：`jcut_lead`（轉場 J-cut 上限，現 0.35）、`jcut_guard`（保留給
+  上一幕的尾靜默，現 0.12）、`hold`/`xfade`/`safety` 等。

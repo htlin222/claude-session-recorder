@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
-"""Build the rsync demo: ONE continuous narration + an explainshell side panel.
+"""Build a CLI lesson: ONE continuous narration + an explainshell side panel.
+
+Tool-agnostic engine. The CONTENT (narration, commands, panel tokens) comes
+from the active lesson (lessons/<name>/lesson.py, picked by config.toml); this
+file knows nothing about rsync or any specific tool.
 
 The voice never stops — it flows sentence to sentence. On-screen actions are
 pinned to sentence timestamps inside that single audio (edge-tts gives a real
 time for every sentence end). The HERO command of each scene is typed token by
 token at a deliberate pace, and each token's panel annotation reveals the moment
 that token finishes typing — so the explanatory sentence walks the flags in the
-same order they appear. compose.py atempo-nudges the audio to the real render
-length to stay locked; overlay.py paints the panel. Subtitles ship as a sidecar
+same order they appear. overlay.py paints the panel. Subtitles ship as a sidecar
 .srt (not burned in)."""
 import json
 import os
 import subprocess
 import tomllib
 
+import lesson                                  # S/R/CLR builders + lesson loader
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # clip/
 DEMO = f"{ROOT}/intermediate"
 AUDIO = f"{DEMO}/audio"
+LESSONS_DIR = f"{ROOT}/lessons"
 CFG = tomllib.load(open(f"{ROOT}/config.toml", "rb"))
 VOICE, RATE = CFG["voice"]["name"], CFG["voice"]["rate"]
 _T, _R = CFG["timing"], CFG["render"]
@@ -27,93 +33,13 @@ INITIAL = _T["initial"]
 OUTPUT_MIN = _T["output_min"]
 TAIL = _T["tail"]
 
-S = lambda t: ("say", t)
-R = lambda c: ("run", c)
-# CLR opens a scene and carries its right-panel data: one-line key point, the
-# hero command to dissect, and annotated tokens (substr, note, role).
-# role -> colour: ord=green, star=peach (scenario's key flag), path=mauve.
-def CLR(key=None, hero=None, toks=None):
-    return ("clear", key, hero, toks or [])
-
-SCRIPT = [
-    CLR(key="rsync · 把 A 同步到 B"),
-    S("先來認識這兩個資料夾，A 是來源，B 是目標。"),
-    S("我們先看看來源 A 裡面有什麼。"),
-    R("tree -a A"),
-    S("有原始碼、文件，還有一個比較大的檔案。"),
-    S("再看看目標 B。"),
-    R("tree B"),
-    S("它只有一份舊的 README，和一個多餘的 obsolete 檔案。"),
-
-    CLR(key="先預覽：-n 只看不動手", hero="rsync -a -v -n A/ B/", toks=[
-        ("-a", "封存模式，保留權限與目錄結構", "ord"),
-        ("-v", "顯示傳輸細節", "ord"),
-        ("-n", "dry-run：只列出計畫，不動檔案", "star"),
-        ("A/ B/", "複製 A 的內容到 B", "path")]),
-    S("同步之前，先養成預覽的好習慣。"),
-    S("先用 -a 封存、加上 -v 顯示細節，再放上關鍵的 -n，把來源 A 同步到 B。"),
-    R("rsync -a -v -n A/ B/"),
-    S("你看，它只列出了計畫，並用 DRY RUN 標示，完全不會動到檔案。"),
-
-    CLR(key="-a -v 標準同步", hero="rsync -a -v A/ B/", toks=[
-        ("-a", "封存模式：保留權限、時間、目錄結構", "star"),
-        ("-v", "顯示傳輸細節", "ord"),
-        ("A/ B/", "結尾斜線＝複製內容，非資料夾", "path")]),
-    S("確認沒問題，我們就正式同步。"),
-    S("這次用 -a 封存模式、搭配 -v 顯示細節，把 A 的內容複製到 B。"),
-    R("rsync -a -v A/ B/"),
-    S("所有檔案，都成功複製過去了。"),
-    R("tree B"),
-    S("現在 B 的內容，跟來源 A 一模一樣。"),
-
-    CLR(key="鏡像同步：--delete 讓 B 跟 A 一致",
-        hero="rsync -a -v --delete A/ B/", toks=[
-        ("-a", "封存模式，保留權限/時間", "ord"),
-        ("-v", "顯示傳輸細節", "ord"),
-        ("--delete", "鏡像：刪除 B 裡 A 沒有的檔案", "star"),
-        ("A/ B/", "複製 A 的內容到 B", "path")]),
-    S("那如果想讓 B 變成 A 的完整鏡像呢？"),
-    S("一樣用 -a 封存、-v 顯示細節，再加上 --delete，讓 B 完全對齊 A。"),
-    R("rsync -a -v --delete A/ B/"),
-    S("注意這一行，多餘的 obsolete 檔案被刪掉了，這個選項要小心使用。"),
-
-    CLR(key="用 --exclude 跳過不要的檔",
-        hero="rsync -a -v --exclude='*.log' --exclude='.cache/' A/ C/", toks=[
-        ("-a", "封存模式，保留結構", "ord"),
-        ("-v", "顯示細節", "ord"),
-        ("--exclude", "排除符合樣式的檔案，可重複（*.log、.cache/）", "star"),
-        ("A/ C/", "這次目標是新資料夾 C", "path")]),
-    S("有些檔案我們並不想同步，例如快取和日誌。"),
-    S("用 -a 封存、-v 顯示細節，再用 --exclude 排除掉 log 跟 cache，同步到新的 C。"),
-    R("rsync -a -v --exclude='*.log' --exclude='.cache/' A/ C/"),
-    S("可以看到，cache 目錄和所有的 log 檔，都被跳過了。"),
-    R("tree -a C"),
-    S("C 裡面乾乾淨淨，只留下我們真正想要的檔案。"),
-
-    CLR(key="-z 壓縮 + 進度顯示", hero="rsync -a -z --info=progress2 A/ C/",
-        toks=[
-        ("-a", "封存模式", "ord"),
-        ("-z", "壓縮資料，節省傳輸頻寬", "star"),
-        ("--info=progress2", "顯示整體傳輸進度", "ord"),
-        ("A/ C/", "同步到資料夾 C", "path")]),
-    S("傳輸大檔，或透過網路同步時，速度就很重要。"),
-    S("我先把這個大檔，改得更大一些。"),
-    R("head -c 12000000 /dev/urandom > A/data/archive.bin"),
-    S("這次用 -a 封存、加上 -z 壓縮，再用 info=progress2 顯示進度，同步到 C。"),
-    R("rsync -a -z --info=progress2 A/ C/"),
-    S("進度條一路跑到百分之百，大檔也同步完成了。"),
-
-    CLR(key="-i 看懂每行變更", hero="rsync -a -v -i A/ B/", toks=[
-        ("-a", "封存模式", "ord"),
-        ("-v", "顯示細節", "ord"),
-        ("-i", "itemize：每行符號標示變更類型", "star"),
-        ("A/ B/", "複製 A 的內容到 B", "path")]),
-    S("最後一個技巧，學會看懂 rsync 的輸出。"),
-    S("用 -a 封存、-v 顯示細節，最後加上 -i，把每一筆變更都標示出來。"),
-    R("rsync -a -v -i A/ B/"),
-    S("開頭的符號，會告訴你檔案是新增、更新，還是只有屬性改變。"),
-    S("掌握這幾招，你就能應付大多數的 rsync 情境了。"),
-]
+# Content comes from the active lesson. Precedence: $LESSON env (used by the
+# /clip workflow to target one slug without touching config) > config.toml
+# [lesson] active > "rsync". The lesson supplies SCRIPT plus a SLUG/TITLE that
+# name the outputs.
+ACTIVE = os.environ.get("LESSON") or CFG.get("lesson", {}).get("active", "rsync")
+_L = lesson.load(ACTIVE, LESSONS_DIR)
+SCRIPT, SLUG, TITLE = _L.SCRIPT, _L.SLUG, _L.TITLE
 
 
 def parse_srt(path):
@@ -137,7 +63,9 @@ def main():
     says = [i[1] for i in SCRIPT if i[0] == "say"]
     text = "".join(says)
     os.makedirs(AUDIO, exist_ok=True)
-    mp3, srt = f"{AUDIO}/voice.mp3", f"{AUDIO}/voice.srt"
+    # namespace the narration cache by lesson so switching lessons never reuses
+    # another lesson's voice track
+    mp3, srt = f"{AUDIO}/{SLUG}.mp3", f"{AUDIO}/{SLUG}.srt"
     if not (os.path.exists(mp3) and os.path.exists(srt)):
         subprocess.run(["edge-tts", "--voice", VOICE, "--rate", RATE,
                         "--text", text, "--write-media", mp3,
@@ -153,8 +81,8 @@ def main():
         return
 
     tape = [
-        "# Auto-generated by build.py — one continuous narration + panel data.",
-        "Output rsync-demo.mp4",
+        f"# Auto-generated by build.py for lesson '{SLUG}' — narration + panel.",
+        "Output terminal.mp4",
         "Set Shell zsh",
         f"Set FontSize {_R['font_size']}", f"Set Width {_R['width']}",
         f"Set Height {_R['height']}",
@@ -258,12 +186,13 @@ def main():
     finalize(total)
 
     open(f"{DEMO}/demo.tape", "w").write("\n".join(tape))
-    json.dump(dict(predicted_total=round(total, 3), anchor=INITIAL, mp3=mp3,
+    json.dump(dict(slug=SLUG, title=TITLE,
+                   predicted_total=round(total, 3), anchor=INITIAL, mp3=mp3,
                    narration_dur=round(D, 3),
                    cues=[[round(a, 3), round(b, 3), x] for a, b, x in cues],
                    panels=panels),
               open(f"{DEMO}/timeline.json", "w"), ensure_ascii=False, indent=2)
-    print(f"predicted total = {total:.1f}s, narration = {D:.1f}s, "
+    print(f"[{SLUG}] predicted total = {total:.1f}s, narration = {D:.1f}s, "
           f"{len(cues)} sentences, {len(panels)} panels")
 
 

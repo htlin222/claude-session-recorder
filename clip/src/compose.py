@@ -12,7 +12,7 @@ import subprocess
 
 import os
 DEMO = f"{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}/intermediate"
-VIDEO = f"{DEMO}/rsync-demo.mp4"
+VIDEO = f"{DEMO}/terminal.mp4"
 AV = f"{DEMO}/_av.mp4"
 
 
