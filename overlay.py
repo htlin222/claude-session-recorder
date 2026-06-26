@@ -91,7 +91,7 @@ def char_xy(lines, k):
     return len(lines) - 1, len(lines[-1][1])
 
 
-def panel_img(p, k, next_key=None):
+def panel_img(p, k, next_key=None, num=None, total=None, next_num=None):
     cjk_b = ImageFont.truetype(CJK, 29)
     cjk = ImageFont.truetype(CJK, 26)
     lblf = ImageFont.truetype(MONO, 27)
@@ -106,19 +106,26 @@ def panel_img(p, k, next_key=None):
         yb = H - 124
         d.line([(PAD, yb), (PANEL_W - PAD, yb)], fill=(52, 54, 66), width=1)
         d.text((PAD, yb + 18), "下一個任務", font=nf_l, fill=muted)
-        nt = next_key
+        label = f"{next_num}  {next_key}" if next_num else next_key
+        nt = label
         while d.textlength(nt + "…", font=nf_t) > INNER and len(nt) > 4:
             nt = nt[:-1]
-        if nt != next_key:
+        if nt != label:
             nt += "…"
         d.text((PAD, yb + 54), nt, font=nf_t, fill=muted)
     if p is not None:
-        klines = wrap_words(p["key"], cjk_b, INNER - 44)
+        nw = 0
+        if num:
+            ns = f"{num} / {total}"
+            nw = d.textlength(ns + "  ", font=cjk_b)
+        klines = wrap_words(p["key"], cjk_b, INNER - 44 - nw)
         bot = 48 + len(klines) * 38 + 14
         d.rectangle([PAD, 40, PANEL_W - PAD, bot], fill=HL)   # square, no radius
         d.line([(PAD, 40), (PAD, bot)], fill=ROLE["star"], width=5)
+        if num:
+            d.text((PAD + 22, 56), ns, font=cjk_b, fill=ROLE["star"])
         for li, ln in enumerate(klines):
-            d.text((PAD + 22, 56 + li * 38), ln, font=cjk_b, fill=TEXT)
+            d.text((PAD + 22 + nw, 56 + li * 38), ln, font=cjk_b, fill=TEXT)
     if p is None or not p.get("cmd"):
         return img
     cmd = p["cmd"]
@@ -314,18 +321,24 @@ def main():
         return max(0.0, anchors[pi] + (sec - panels[pi]["banner"]) * scale
                    - PANEL_LEAD)
 
+    ntasks = len(panels) - 1                 # command scenes are numbered 1..N
     blank = _save(panel_img(None, 0), f"{PDIR}/blank.png")
     states = [(0.0, blank)]
     for pi, p in enumerate(panels):
         nk = panels[pi + 1]["key"] if pi + 1 < len(panels) else None
-        states.append((st(pi, p["banner"]), _save(panel_img(p, 0, nk),
-                                                   f"{PDIR}/p{pi}_b.png")))
+        num = pi if pi >= 1 else None         # intro (pi=0) unnumbered
+        nnum = pi + 1 if nk else None
+
+        def pim(kk):
+            return panel_img(p, kk, nk, num, ntasks, nnum)
+        states.append((st(pi, p["banner"]),
+                       _save(pim(0), f"{PDIR}/p{pi}_b.png")))
         if p["hero"]:
             states.append((st(pi, p["cmd_start"]),
-                           _save(panel_img(p, 0, nk), f"{PDIR}/p{pi}_c.png")))
+                           _save(pim(0), f"{PDIR}/p{pi}_c.png")))
             for ki, t in enumerate(p["tokens"], start=1):
                 states.append((st(pi, t["reveal"]),
-                               _save(panel_img(p, ki, nk), f"{PDIR}/p{pi}_{ki}.png")))
+                               _save(pim(ki), f"{PDIR}/p{pi}_{ki}.png")))
     states.sort(key=lambda s: s[0])
     segs = [(png, (states[i+1][0] if i+1 < len(states) else total) - t0)
             for i, (t0, png) in enumerate(states)]
