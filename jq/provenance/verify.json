@@ -1,0 +1,22 @@
+{
+  "slug": "jq",
+  "expected_scenes": 13,
+  "detected_clears": 13,
+  "method": "detect",
+  "structural_synced": true,
+  "terminal_sec": 261.64,
+  "final_sec": 298.56,
+  "narration_sec": 280.68,
+  "narration_fits": true,
+  "target_sec": 300.0,
+  "on_target": true,
+  "jcut_applied": 13,
+  "jcut_total": 13,
+  "jcut_mean_sec": 0.35,
+  "jcut_clips": 0,
+  "min_gap_sec": 0.995,
+  "voice_overruns": 0,
+  "fixable": false,
+  "override_written": false,
+  "verdict": "PASS"
+}
