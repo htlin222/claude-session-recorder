@@ -36,3 +36,6 @@ mdp-demo/
 # portable per-slug folders: scratch + vendored venv (regenerable)
 */intermediate/
 engine/**/__pycache__/
+engine/experimental/**/work/
+engine/experimental/nvim/out.mp4
+engine/experimental/nvim/code.py
