@@ -1,7 +1,7 @@
 export const meta = {
   name: 'clip',
   description: 'Make a 4–6 min CLI-education clip from ./material (or an instruction) using the clip/ render engine; final lands in ./<slug>/',
-  whenToUse: 'Produce a narrated CLI teaching video. Reads ./material/ and/or the /clip <instruction> arg, authors a lesson under clip/lessons/<slug>/, renders via the clip/ engine, copies the finished mp4/srt/html into ./<slug>/.',
+  whenToUse: 'Produce a narrated CLI teaching video. Reads ./material/ and/or the /clip <instruction> arg, scaffolds a portable self-contained ./<slug>/ folder from the engine/ template, authors + renders its lesson in-place, leaving <slug>/<slug>.mp4 + provenance/ + a handoff CLAUDE.md.',
   phases: [
     { title: 'Design', detail: 'read material + instruction, plan a ~5 min lesson' },
     { title: 'EnvCheck', detail: 'deterministically probe the lesson tools (GNU vs BSD, present?)' },
@@ -14,24 +14,26 @@ export const meta = {
 
 // ---- shared context handed to every agent (they don't see this conversation) ----
 const ENGINE = `
-RENDER ENGINE (do not modify its source): the repo root holds clip/, a
-tool-agnostic CLI-education video engine. CWD for every command is the repo root.
+PORTABLE CLIP MODEL: each clip is a SELF-CONTAINED folder ./<slug>/ at the repo
+root that vendors a COPY of the render engine. You scaffold it from engine/ (the
+template) and build INSIDE it. You author only two files; never edit src/.
 
-A *lesson* is the only thing you create. It lives in  clip/lessons/<slug>/  and is:
-  lesson.py  - defines three module names and nothing tool-specific:
-                 from lesson import S, R, CLR        # provided by clip/src/lesson.py
-                 SLUG  = "<slug>"                     # kebab-case; names all outputs
-                 TITLE = "<human title>"
-                 SCRIPT = [ ...timeline... ]
-  setup.sh   - bash '#!/usr/bin/env bash' + 'set -euo pipefail'; (re)creates this
-               lesson's throwaway demo env in its PER-SLUG workspace. Start with:
-                 DEMO="\${CLIP_DEMO:-$(cd "$(dirname "$0")/../../intermediate" && pwd)/$(basename "$(dirname "$0")")}"
-                 mkdir -p "$DEMO"; cd "$DEMO"
-               then 'rm -rf <yourdirs>' and recreate them. Must be idempotent and
-               self-contained. Make any file the commands need (sample trees, a
-               >1MB file for size demos, backdated timestamps for time demos, etc).
+  ./<slug>/
+    lesson.py    THE CONTENT you write. Defines, nothing tool-specific:
+                   from clipkit import S, R, CLR      # the vendored lib in src/
+                   SLUG  = "<slug>"                   # kebab-case
+                   TITLE = "<human title>"
+                   SCRIPT = [ ...timeline... ]
+    setup.sh     bash '#!/usr/bin/env bash' + 'set -euo pipefail'; (re)creates the
+                 demo env this clip's commands need. Start with EXACTLY:
+                   DEMO="$(cd "$(dirname "$0")" && pwd)/intermediate"
+                   mkdir -p "$DEMO"; cd "$DEMO"
+                 then 'rm -rf <yourdirs>' and recreate them (sample trees, a >1MB
+                 file for size demos, backdated timestamps, etc). Idempotent.
+    src/         the vendored engine (copied from engine/; do NOT edit it).
+    config.toml  CLAUDE.md   copied from the template by the scaffold step.
 
-SCRIPT builders (imported from lesson):
+SCRIPT builders (imported from clipkit):
   S("一句旁白")                         one continuous-narration sentence (zh-TW)
   R("the command to run")               a command typed + executed on screen
   CLR(key=..., hero=..., toks=[...])    opens a scene + its right-hand explain panel
@@ -63,7 +65,7 @@ HARD RULES (the build will reject or mis-sync otherwise):
      with your S() list. A mismatch makes build.py print "cue/sentence mismatch"
      and refuse to write the tape — if you see that, fix sentence boundaries.
 
-Pattern per command scene (mirror clip/lessons/rsync/lesson.py and find/lesson.py):
+Pattern per command scene (mirror ./jq/lesson.py, the reference example):
   CLR(key="...", hero="cmd --flag X", toks=[("cmd-or-arg","...","path"),
        ("--flag","...","star")]),
   S("引入這個情境的一句話。"),
@@ -71,18 +73,21 @@ Pattern per command scene (mirror clip/lessons/rsync/lesson.py and find/lesson.p
   R("cmd --flag X"),
   S("看結果，總結這個情境的一句話。"),
 
-ENGINE COMMANDS (run from repo root; <slug> is your lesson slug):
-  # one-time venv for the panel renderer (skip if clip/.venv exists)
-  ( cd clip && uv venv .venv && uv pip install --python .venv/bin/python pillow numpy )
-  # Every step is PER-SLUG (workspace = clip/intermediate/<slug>) so runs are
-  # parallel-safe. LESSON=<slug> picks the slug for build/overlay/setup.
+ENGINE COMMANDS — scaffold the portable folder once, then build INSIDE it
+(CWD = repo root; everything is self-contained under ./<slug>/ so runs are
+parallel-safe by folder):
+  # scaffold from the template (first author pass only)
+  command cp -R engine <slug>
+  command mv <slug>/CLAUDE.tmpl.md <slug>/CLAUDE.md && sed -i '' "s/{{SLUG}}/<slug>/g" <slug>/CLAUDE.md
+  command rm <slug>/lesson.skel.py                       # you write <slug>/lesson.py instead
+  ( cd <slug> && uv venv .venv && uv pip install --python .venv/bin/python pillow numpy )
   # 1) narration + tape + timeline
-  ( cd clip && LESSON=<slug> python3 src/build.py )      # prints "predicted total = Xs"
-  # 2) build env + render terminal (vhs runs INSIDE the per-slug workspace)
-  ( cd clip && LESSON=<slug> bash src/setup_dirs.sh )
-  ( cd clip/intermediate/<slug> && vhs demo.tape )      # -> clip/intermediate/<slug>/terminal.mp4
+  ( cd <slug> && python3 src/build.py )                  # prints "predicted total = Xs"
+  # 2) build env + render terminal
+  ( cd <slug> && bash setup.sh )
+  ( cd <slug>/intermediate && vhs demo.tape )            # -> <slug>/intermediate/terminal.mp4
   # 3) composite panel + transitions + fades
-  ( cd clip && LESSON=<slug> .venv/bin/python src/overlay.py )   # -> clip/dist/<slug>.mp4 + .srt
+  ( cd <slug> && .venv/bin/python src/overlay.py )       # -> <slug>/<slug>.mp4 + .srt
 
 DURATION CALIBRATION: build's "predicted total" is the narration length; overlay
 then adds intro/holds/transitions (~+1s per scene, ~+13s total for a 5–6 min clip).
@@ -160,7 +165,7 @@ const RENDER = {
   required: ['ok', 'final_mp4', 'final_srt', 'final_duration_sec', 'error'],
   properties: {
     ok: { type: 'boolean' },
-    final_mp4: { type: 'string', description: 'path to clip/dist/<slug>.mp4 (or "" on failure)' },
+    final_mp4: { type: 'string', description: 'path to <slug>/<slug>.mp4 (or "" on failure)' },
     final_srt: { type: 'string' },
     final_duration_sec: { type: 'number' },
     error: { type: ['string', 'null'] },
@@ -251,7 +256,7 @@ phase('EnvCheck')
 const toolList = (plan.tools && plan.tools.length ? plan.tools : [slug]).join(' ')
 const env = await agent(`
 Run this deterministic environment probe and return its result, nothing else:
-  ( cd clip && python3 src/envcheck.py ${toolList} )
+  python3 engine/src/envcheck.py ${toolList}
 It prints aligned human lines and one machine line beginning "ENV_JSON " with a
 JSON array. Parse that array and return it verbatim as \`tools\`. Do not edit,
 re-order, or editorialize the values.
@@ -298,9 +303,13 @@ PLAN (from the design phase):
 ${JSON.stringify(plan, null, 2)}
 
 ${first ? `
-Create both files now:
-  clip/lessons/${slug}/lesson.py   (SLUG="${slug}", TITLE, SCRIPT per the plan)
-  clip/lessons/${slug}/setup.sh    (chmod +x it; build whatever env the commands need)
+SCAFFOLD the portable folder from the template, then write your two files:
+  command cp -R engine ${slug}
+  command mv ${slug}/CLAUDE.tmpl.md ${slug}/CLAUDE.md && sed -i '' "s/{{SLUG}}/${slug}/g" ${slug}/CLAUDE.md
+  command rm ${slug}/lesson.skel.py
+Now write (in the ${slug}/ folder):
+  ${slug}/lesson.py   (from clipkit import S, R, CLR; SLUG="${slug}", TITLE, SCRIPT per the plan)
+  ${slug}/setup.sh    (chmod +x; demo env per the ENGINE setup.sh contract)
 Write natural, flowing zh-TW narration. Obey the THREE HARD RULES exactly.
 ` : `
 A previous pass built at ${fit ? fit.predicted_sec : '?'}s; target is ${LO}–${HI}s
@@ -317,8 +326,8 @@ count matches, then rebuild.
 `}
 
 Then run, from the repo root:
-  ( [ -d clip/.venv ] || ( cd clip && uv venv .venv && uv pip install --python .venv/bin/python pillow numpy ) )
-  ( cd clip && rm -f intermediate/audio/${slug}.mp3 intermediate/audio/${slug}.srt; LESSON=${slug} python3 src/build.py )
+  ( [ -d ${slug}/.venv ] || ( cd ${slug} && uv venv .venv && uv pip install --python .venv/bin/python pillow numpy ) )
+  ( cd ${slug} && rm -f intermediate/audio/${slug}.mp3 intermediate/audio/${slug}.srt; python3 src/build.py )
 Read the printed "predicted total = Xs, narration = Ys, N sentences, M panels"
 line. Report it. (Deleting the cached audio forces re-synth after you edit
 narration — do it every pass.) Do NOT run vhs/overlay; that's the next phase.
@@ -339,16 +348,16 @@ Render the already-authored, duration-fitted lesson "${slug}" to a finished vide
 
 ${ENGINE}
 
-The lesson files exist and build.py already produced clip/intermediate/demo.tape
-and timeline.json for this slug (predicted ${fit.predicted_sec}s). Start a fresh
-build log, then run each step teeing into it (the log is bundled into the product):
-  : > clip/dist/${slug}.build.log
-  ( cd clip && LESSON=${slug} bash src/setup_dirs.sh )              2>&1 | tee -a clip/dist/${slug}.build.log
-  ( cd clip/intermediate/${slug} && vhs demo.tape )                 2>&1 | tee -a clip/dist/${slug}.build.log
-  ( cd clip && LESSON=${slug} .venv/bin/python src/overlay.py )     2>&1 | tee -a clip/dist/${slug}.build.log
+The lesson files exist and build.py already produced ${slug}/intermediate/demo.tape
+and timeline.json (predicted ${fit.predicted_sec}s). Start a fresh build log, then
+run each step teeing into it (the log is bundled into the product):
+  : > ${slug}/build.log
+  ( cd ${slug} && bash setup.sh )                         2>&1 | tee -a ${slug}/build.log
+  ( cd ${slug}/intermediate && vhs demo.tape )            2>&1 | tee -a ${slug}/build.log
+  ( cd ${slug} && .venv/bin/python src/overlay.py )       2>&1 | tee -a ${slug}/build.log
 
-Then confirm clip/dist/${slug}.mp4 and clip/dist/${slug}.srt exist and probe the
-mp4 duration with ffprobe. If vhs or ffmpeg errors, read the error, fix the
+Then confirm ${slug}/${slug}.mp4 and ${slug}/${slug}.srt exist and probe the mp4
+duration with ffprobe. If vhs or ffmpeg errors, read the error, fix the
 environment cause if you can (e.g. missing tool, bad setup.sh path) and retry once;
 otherwise report the error verbatim. Report the real final duration.
 `.trim(), { schema: RENDER, phase: 'Render', label: `render ${slug}` })
@@ -365,16 +374,16 @@ Verify the audio↔video sync of the finished clip "${slug}", and auto-heal it i
 it desynced. The pipeline ships src/verify_sync.py (the measurable signal) and
 overlay.py honors a guided-clears override. Run from the repo root:
 
-  ( cd clip && .venv/bin/python src/verify_sync.py --slug ${slug} --target-sec ${targetSec} --tol-sec 60 --write-override ) 2>&1 | tee -a clip/dist/${slug}.build.log
+  ( cd ${slug} && .venv/bin/python src/verify_sync.py --target-sec ${targetSec} --tol-sec 60 --write-override ) 2>&1 | tee -a ${slug}/build.log
 
 Read its output: a line "[${slug}] PASS|FAIL_FIXABLE|FAIL: ..." and a machine line
 "VERIFY_JSON {...}". Then:
   - PASS  -> nothing to do; report it.
-  - FAIL_FIXABLE -> it wrote intermediate/${slug}/clears_override.json (guided
+  - FAIL_FIXABLE -> it wrote ${slug}/intermediate/clears_override.json (guided
       clears that fix the scene count). RE-COMPOSITE without re-running vhs:
-        ( cd clip && LESSON=${slug} .venv/bin/python src/overlay.py )             2>&1 | tee -a clip/dist/${slug}.build.log
+        ( cd ${slug} && .venv/bin/python src/overlay.py )                         2>&1 | tee -a ${slug}/build.log
       then RE-VERIFY to confirm it's now in sync:
-        ( cd clip && .venv/bin/python src/verify_sync.py --slug ${slug} --target-sec ${targetSec} --tol-sec 60 ) 2>&1 | tee -a clip/dist/${slug}.build.log
+        ( cd ${slug} && .venv/bin/python src/verify_sync.py --target-sec ${targetSec} --tol-sec 60 ) 2>&1 | tee -a ${slug}/build.log
       Report the FINAL verdict after re-verify. Set fix_applied=true.
   - FAIL (not fixable: narration cut, or no guided solution) -> do NOT loop blindly;
       report the reasons verbatim so the caller can decide.
@@ -399,33 +408,23 @@ if (!syncOk) log(`⚠ sync not PASS for ${slug}: ${sync ? sync.reasons : 'unknow
 // ---------------------------------------------------------------- Deliver
 phase('Deliver')
 const deliver = await agent(`
-Package the finished clip "${slug}" into its own product folder at the repo root.
-
-Do this from the repo root:
-  mkdir -p ${slug}
-  cp clip/dist/${slug}.mp4 ${slug}/${slug}.mp4
-  cp clip/dist/${slug}.srt ${slug}/${slug}.srt
+Finalize the portable clip folder ./${slug}/ (the product ${slug}.mp4 + .srt are
+already there from overlay.py). From the repo root:
   # offline HTML player (best-effort; skip if the generator is missing)
   python3 ~/.claude/skills/agent-demo-recorder/scripts/gen_html.py \\
-      clip/dist/${slug}.mp4 -o ${slug}/${slug}.html || true
-  # freeze this render's provenance into ${slug}/provenance/ — clip/intermediate/
-  # is SHARED scratch the next build overwrites, so without this the clip becomes
-  # unreproducible. Writes timeline/sync/jcut reports, verify.json (the 5 gates),
-  # a config snapshot, terminal.mp4 + narration.mp3, the lesson source, build.log
-  # and PROVENANCE.md. (Folder is "provenance/" not "build/" — "build/" is in most
-  # global gitignores.)
-  ( cd clip && .venv/bin/python src/bundle.py --slug ${slug} --target-sec ${targetSec} --tol-sec 60 )
+      ${slug}/${slug}.mp4 -o ${slug}/${slug}.html || true
+  # freeze the provenance into ${slug}/provenance/ (verify.json = the 5 gates,
+  # timeline/sync/jcut reports, config snapshot, terminal.mp4 + narration.mp3, a
+  # copy of lesson.py/setup.sh, build.log, PROVENANCE.md)
+  ( cd ${slug} && .venv/bin/python src/bundle.py --target-sec ${targetSec} --tol-sec 60 )
 
 Then write ${slug}/manifest.md with: the title (${JSON.stringify(plan.title)}),
 audience, a one-paragraph summary, the scene list (key + hero command), the final
 duration (${render.final_duration_sec}s), an **A/V sync** line stating
 "${syncOk ? `sync verified (PASS) — J-cut on ${sync.jcut_applied}/${sync.jcut_total} transitions, mean ${sync.jcut_mean_sec}s; min gap ${sync.min_gap_sec}s; 0 voice overruns` : 'SYNC NOT VERIFIED — ' + (sync ? sync.reasons : 'unknown') + ' (review before publishing)'}",
-a **Provenance** line noting that ${slug}/provenance/ holds the frozen record of
-this render (timeline/sync/jcut reports, verify.json, config snapshot, terminal.mp4
-+ narration.mp3, lesson source, build.log) and that provenance/PROVENANCE.md explains
-how to re-composite from it without re-running vhs; and a note that the canonical source
-lesson lives in clip/lessons/${slug}/ and a full rebuild is
-\`( cd clip && LESSON=${slug} python3 src/build.py && LESSON=${slug} bash src/setup_dirs.sh ) && ( cd clip/intermediate/${slug} && vhs demo.tape ) && ( cd clip && LESSON=${slug} .venv/bin/python src/overlay.py )\`.
+and a **Provenance** line noting that ${slug}/provenance/ holds the frozen record
+and that the folder is self-contained & portable — its own CLAUDE.md documents how
+to rebuild (\`cd ${slug} && python3 src/build.py && bash setup.sh && ( cd intermediate && vhs demo.tape ) && .venv/bin/python src/overlay.py\`).
 
 List every file you placed in ${slug}/ (including the provenance/ bundle's contents).
 `.trim(), { schema: DELIVER, phase: 'Deliver', label: `deliver ${slug}` })
