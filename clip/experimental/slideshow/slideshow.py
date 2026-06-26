@@ -46,8 +46,8 @@ PALETTE = [(166, 227, 161), (137, 180, 250), (250, 179, 135),
 INITIAL = 0.4          # idle before typing the launch command
 MDP_BOOT = 1.1         # let mdp draw slide 0 before narration starts
 TS = 0.024             # modelled per-char typing (only the launch command types)
-DWELL = 0.45           # min extra dwell per slide
-TAIL = 1.6
+END_HOLD = 1.6         # SAFE BUFFER: hold the last slide this long AFTER the voice
+                       #   finishes, before the fade — so the voice is never clipped
 INTRO, FADE_IN, FADE_OUT = 0.6, 0.7, 0.9
 
 # ── the deck: each slide = markdown (left), detail (right panel), narration ──
@@ -208,22 +208,19 @@ def main():
     # 2) tape: launch mdp, then Space at each advance time, then quit
     launch = "mdp deck.md"
     t0 = INITIAL + len(launch) * TS + MDP_BOOT      # when slide 0 is up
+    bounds = advance + [narr]                       # slide i shown for bounds diff
+    slide_dur = [bounds[i + 1] - bounds[i] for i in range(len(DECK))]
     tape = ["Output terminal.mp4", "Set Shell zsh", "Set FontSize 28",
             f"Set Width {TERM_W}", f"Set Height {H}", 'Set Theme "Catppuccin Mocha"',
             "Set Padding 40", "Hide", 'Type "clear"', "Enter", "Show",
             f"Sleep {INITIAL}s", f'Type "{launch}"', "Enter", f"Sleep {MDP_BOOT}s"]
-    vt = t0
-    for i in range(1, len(DECK)):
-        target = t0 + advance[i]
-        if target - vt > 0.02:
-            tape.append(f"Sleep {round(target - vt, 2)}s")
-        tape.append("Space")
-        vt = target
-    # hold last slide for its narration, then quit
-    end = t0 + narr + TAIL
-    if end - vt > 0.02:
-        tape.append(f"Sleep {round(end - vt, 2)}s")
-    tape += ['Type "q"', "Sleep 400ms"]
+    for i in range(len(DECK)):
+        hold = slide_dur[i] + (END_HOLD if i == len(DECK) - 1 else 0.0)
+        tape.append(f"Sleep {round(hold, 2)}s")
+        if i < len(DECK) - 1:
+            tape.append("Space")                    # advance to the next slide
+    # NB: no `q` — end ON the last slide, so the final frame is the slide (not the
+    # shell prompt). The composite then anchors the fade to the voice, not here.
     open(os.path.join(WORK, "demo.tape"), "w").write("\n".join(tape))
 
     print(f"slides={len(DECK)} sentences={len(says)} narration={narr:.1f}s t0={t0:.2f}s")
@@ -264,14 +261,21 @@ def main():
                    check=True, capture_output=True)
     final = os.path.join(OUT, "mdp-demo.mp4")
     d_ms = int((t0 + INTRO) * 1000)                 # narration starts when slide 0 is up
-    fo = total + INTRO - FADE_OUT
+    voice_end = t0 + INTRO + narr
+    fo = voice_end + END_HOLD                       # fade starts a safe hold AFTER voice
+    final_len = fo + FADE_OUT
+    # freeze the last slide generously (stop_mode=clone), then -t trims to the
+    # voice-anchored length — so the tail is always exactly END_HOLD+FADE_OUT,
+    # never a long silent tail nor a clipped last word.
     subprocess.run([FF, "-y", "-i", vid, "-i", mp3, "-filter_complex",
                     f"[0:v]tpad=start_duration={INTRO}:start_mode=add:color=0x181825,"
+                    f"tpad=stop_duration={END_HOLD + FADE_OUT + 1.0:.3f}:stop_mode=clone,"
                     f"fade=t=in:st={INTRO}:d={FADE_IN}:color=0x181825,"
                     f"fade=t=out:st={fo:.3f}:d={FADE_OUT}:color=0x181825[v];"
                     f"[1:a]adelay={d_ms}|{d_ms},afade=t=out:st={fo:.3f}:d={FADE_OUT}[a]",
-                    "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-pix_fmt",
-                    "yuv420p", "-crf", "20", "-c:a", "aac", "-b:a", "160k", final],
+                    "-map", "[v]", "-map", "[a]", "-t", f"{final_len:.3f}",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
+                    "-c:a", "aac", "-b:a", "160k", final],
                    check=True, capture_output=True)
 
     # 5) sidecar subtitles on the final timeline
