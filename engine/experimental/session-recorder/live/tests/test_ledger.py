@@ -25,3 +25,16 @@ def test_beat_end_ignores_dropped_voice():
             "visual": {"start": 2.0, "end": 4.0},
             "panel": {"switch_at": 2.0}}
     assert ledger.beat_end(beat) == 4.0
+
+
+def test_beat_start_is_min_of_active_channels():
+    beat = {"voice": {"start": 1.0, "end": 3.0},
+            "visual": {"start": 3.2, "end": 5.0},
+            "panel": {"switch_at": 0.8}}
+    assert ledger.beat_start(beat) == 0.8
+
+
+def test_beat_start_ignores_dropped_voice():
+    beat = {"voice": None, "visual": {"start": 2.0, "end": 4.0},
+            "panel": {"switch_at": 2.0}}
+    assert ledger.beat_start(beat) == 2.0
