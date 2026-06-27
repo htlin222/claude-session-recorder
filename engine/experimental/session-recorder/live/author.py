@@ -175,9 +175,11 @@ def build_ledger(demo, script, anchors, write=True):
     tail = next(s for s in timed if s.get("role") == "tail")
     beats = []
 
-    def add(kind, ti, text, clip_rel, vstart, vdur, vis, mode, tier, drop=False):
+    def add(kind, ti, text, clip_rel, vstart, vdur, vis, mode, tier, drop=False,
+            id_payload=None):
         beats.append({
-            "id": beat_id(kind, ti, text), "kind": kind, "turn_idx": ti,
+            "id": beat_id(kind, ti, text if id_payload is None else id_payload),
+            "kind": kind, "turn_idx": ti,
             "text": text, "tier": tier, "mode": mode, "drop": drop,
             "voice": (None if (drop or not clip_rel) else
                       {"clip": clip_rel, "start": round(vstart, 3), "end": round(vstart + vdur, 3)}),
@@ -191,7 +193,8 @@ def build_ledger(demo, script, anchors, write=True):
     # ---- launch beats: sequential from the boot out-start -------------------
     cur = boot["out"][0]
     for slot, text, c, d in launch:
-        add("launch_flag", -1, f"{slot}:{text}", c, cur, d, pt(cur + d), "lead", 1)
+        add("launch_flag", -1, text, c, cur, d, pt(cur + d), "lead", 1,
+            id_payload=f"{slot}:{text}")
         cur += d + BREATH
 
     # ---- per-turn beats ----------------------------------------------------
