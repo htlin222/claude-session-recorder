@@ -39,3 +39,8 @@ engine/**/__pycache__/
 engine/experimental/**/work/
 engine/experimental/nvim/out.mp4
 engine/experimental/nvim/code.py
+
+# session-recorder scratch (one timeline per recording; regenerable)
+engine/experimental/session-recorder/session-timeline.jsonl
+engine/experimental/session-recorder/session-voiceover.*
+engine/experimental/session-recorder/_seg/

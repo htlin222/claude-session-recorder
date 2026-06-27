@@ -1,0 +1,14 @@
+{
+  "_comment": "Session timeline recorder — logs (time, event, detail) for each fired hook event to engine/experimental/session-recorder/session-timeline.jsonl. Post-hoc, gen_voiceover.py turns it into a timecode-matched narration. Non-blocking; safe to remove these hooks anytime.",
+  "hooks": {
+    "SessionStart":     [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/engine/experimental/session-recorder/timelog.py\"" } ] } ],
+    "UserPromptSubmit": [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/engine/experimental/session-recorder/timelog.py\"" } ] } ],
+    "PreToolUse":       [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/engine/experimental/session-recorder/timelog.py\"" } ] } ],
+    "PostToolUse":      [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/engine/experimental/session-recorder/timelog.py\"" } ] } ],
+    "Notification":     [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/engine/experimental/session-recorder/timelog.py\"" } ] } ],
+    "SubagentStart":    [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/engine/experimental/session-recorder/timelog.py\"" } ] } ],
+    "SubagentStop":     [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/engine/experimental/session-recorder/timelog.py\"" } ] } ],
+    "Stop":             [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/engine/experimental/session-recorder/timelog.py\"" } ] } ],
+    "SessionEnd":       [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PROJECT_DIR}/engine/experimental/session-recorder/timelog.py\"" } ] } ]
+  }
+}
