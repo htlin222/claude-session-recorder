@@ -20,8 +20,9 @@ lights up while typing, clears on submit) — not tape arithmetic, which drifts.
 | `vhs_stop_sentinel.sh` | Stop hook printing the on-screen `VHS_TURN_DONE_N` marker VHS waits on (gated on `$VHS_DEMO`). |
 | `script.example.json` | The narration script: a `launch` block (the opening CLI lesson), per-turn `{prompt, intro, think, outro}`, and a `close`. |
 | `gen_session_tape.py` | `script.json` → a VHS tape with deterministic intro/outro voice slots (sized to the synthesized clips), plus `plan.json` + `_voice/*.mp3`. |
-| `session_overlay.py` | Detects the real per-turn typing/submit frames, places each clip (intro leads typing, think rides the gap, outro/open/close in their slots), muxes the narration over `terminal.mp4` → `session.mp4` + `.srt`. |
-| `verify_session.py` | Gate: voice-leads-typing, think fits the gap, no overlap. Exit 0 PASS / 1 fixable / 2 structural. |
+| `session_overlay.py` | Detects every per-turn anchor (typing_start, submit, done) FROM THE VIDEO (the hook wall-clock drifts ~8s from VHS video time — unusable), places each clip (intro leads typing, think rides `[submit,done]`, outro/open/close in their slots), muxes the narration over `terminal.mp4` → `session.mp4` + `.srt`. The input band auto-locates (bottom variance peak) — no per-layout tuning. |
+| `session_panel.py` | (Optional) Roadmap #3 right panel: composites `terminal.mp4` (left, 1200px) with a 720px panel — launch flags dissected (appearing WITH the voice), then each turn's tool actions (from the timeline, mapped into the detected `[submit,done]` window by wall-clock fraction) + the conclusion → `session_panel.mp4`. |
+| `verify_session.py` | Gate: voice-leads-typing, think fits the gap, no overlap, min-gap. Exit 0 PASS / 1 fixable / 2 structural. |
 
 ## Pipeline
 ```bash
@@ -32,9 +33,11 @@ rm -f "$SR/session-timeline.jsonl"          # one recording per timeline
 # 1) clean isolated sandbox (idempotent)
 "$SR/live/claude_sandbox.sh" "$DEMO"
 
-# 2) author tape + voice slots + plan.json from the narration script
+# 2) author tape + voice slots + plan.json from the narration script.
+#    Render at 1200x1080 if you want the right-side panel (step 6).
 python3 "$SR/live/gen_session_tape.py" --demo "$DEMO" \
-        --script "$SR/live/script.example.json" -o "$DEMO/session.tape"
+        --script "$SR/live/script.example.json" \
+        --width 1200 --height 1080 --font-size 26 -o "$DEMO/session.tape"
 
 # 3) film the real TUI -> terminal.mp4 (+ session-timeline.jsonl from the hooks)
 cd "$DEMO" && vhs session.tape
@@ -44,6 +47,9 @@ cd "$DEMO" && vhs session.tape
 
 # 5) gate the sync (loop until it passes)
 python3 "$SR/live/verify_session.py" --demo "$DEMO"
+
+# 6) (optional) add the explainshell-style right panel -> session_panel.mp4
+.venv/bin/python "$SR/live/session_panel.py" --demo "$DEMO"
 ```
 If step 5 reports a turn whose **think voice overruns** its real gap (claude
 answered too fast), shorten that turn's `think` line in the script and re-record

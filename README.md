@@ -154,9 +154,13 @@ We have the teaching scaffolding. The remaining piece is filming Claude Code
    `Wait@timeout /sentinel/` between turns (no guessed `Sleep`); VHS records the
    real TUI → `terminal.mp4`. The sandbox is what makes this filmable at all —
    see `live/README.md` for the four config traps it defeats (focus mode first).
-3. ⏳ **overlay "session mode"** — anchor the panel to the **hook timecodes** (not
-   clear-detection) and use the **event / Stop-message** panel; narration from
-   `gen_voiceover.py`. (A course-assembly/montage layer is a later nicety.)
+3. ✅ **overlay "session mode"** — `live/session_panel.py`: left terminal (1200px)
+   + a 720px explainshell panel. Launch flags are dissected appearing WITH the
+   voice; each turn shows its tool actions + the Stop conclusion. Anchored to
+   VIDEO-DETECTED timecodes, NOT the hook clock — the hook wall-clock drifts ~8s
+   from VHS video time over a session (non-uniform), so it can't be mapped; tool
+   events are mapped into each detected `[submit,done]` window by wall-clock
+   fraction. (A course-assembly/montage layer is a later nicety.)
 
 ## Status
 14 portable clips rendered + verified PASS; engine + `/clip` workflow + 3 clip-type

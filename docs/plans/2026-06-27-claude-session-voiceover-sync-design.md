@@ -118,3 +118,45 @@ token 落在 `onset + 旁白時長`（唸完的瞬間）。實證：唸「claude
 以 fizzbuzz 兩 turn demo 跑完整 pipeline：verify_sync session 模式 PASS，
 人工觀看確認每個 prompt 都是「先聽到 intro、才看到打字」，think 旁白蓋在 spinner 上、
 outro 蓋在結果上，全程無「命令先跑」。
+
+---
+
+## 實作演化（hard-won，照 sync-model.md 的精神記錄）
+
+設計提的「依真實時間軸 fit 語音 + loop」方向對，但實作時撞到幾個只有做下去才會發現的坑，
+這裡記錄定案的真正做法，免得未來走回頭路。
+
+### A. 致命：VHS 影片時間會漂離 hook wall-clock（8.3s）→ 一切時間改從影片偵測
+原設計打算用 `Stop_i - UserPromptSubmit_i`（timeline 的 wall-clock 差）定位回應結束。
+**實測**：一段 70s 的 session，hook wall-clock 走了 69.85s，但 VHS 影片只走了 61.52s ——
+**漂移 8.3s（~12%）、且非均勻**（集中在重輸出的 turn，VHS 跟不上即時就壓縮）。
+所以 wall-clock **無法**（單一或逐 turn offset 都不行）映射到影片時間。
+**定案**：硬軸的真相只有**影片本身**。`session_overlay.py` 一切錨點從終端像素偵測：
+- 打字 = 輸入框訊號**衝高後落回**（結尾定格也會衝高但不落，用「時長 < 8s」排除）→
+  `(typing_start, submit)`。
+- `done`（claude 完成）= submit 後 full-screen 內容**最後一次大跳變**。
+timeline **只**用來知道「做了什麼工具」（panel 用），事件按 wall-clock **比例**映進該 turn
+偵測到的 `[submit, done]` 窗口（逐 turn 比例 → 全域漂移被吸收）。
+
+### B. 輸入框 band 自動定位（消掉最後一個手調點）
+偵測輸入框一度要手調 y 帶（換字號/終端高度就壞）。**定案**：輸入框 = 底部**時間變異度最高**
+的列（打字明暗變化最大），狀態列近乎常亮、暗底 baseline 均勻 → 取底部 variance peak 即可，
+跨版面免調。
+
+### C. 瞬間輸出「聲音先行、唸完才現」+ panel 與 voice 同起
+見上「核心原則」。launch 每個 flag：`Sleep(旁白) → Type(token)`（唸完才打）。
+**panel 跟 voice 同時**出現（在旁白起點揭露該 flag），**不等**終端打字 —— panel/voice 是
+「講解層」、終端是「被講解的動作」，講解先行。
+
+### D. 開場用「逐 flag 完整句」而非一段連讀
+一段連讀 → 句子擠在一起聽起來趕；切碎成逗號片段 + 短間隔 → 「前言未完後句壓過」。
+**定案**：每個 flag 一句**完整句**（句號結尾、可自足），彼此留 `BEAT_GAP`（0.8s）。
+這就是「**先把操作秒數（每段槽）定好，voice 寫成能自足填入的完整句**」。
+
+### E. overlay「session mode」右側 panel（Roadmap #3，已做）
+左終端 1200px + 右 panel 720px。launch = explainshell 式 flag 拆解（appear-with-voice）；
+turn = 動作事件清單（Write/Edit/Bash，按偵測窗口比例浮現）+ Stop 結論。
+panel 字體統一（Hiragino，中英皆可），終端維持 mono 形成層次。`session_panel.py`。
+
+> 教訓重述：CLI-lesson 因輸出決定性，可「語音釘畫面」；claude 路徑因影片時間會漂、
+> 回應不可控，必須**反過來鎖在影片偵測的真實影格上**（panel 配合 term），其餘全用決定性規則。
