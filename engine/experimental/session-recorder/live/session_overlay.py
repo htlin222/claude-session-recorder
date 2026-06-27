@@ -112,10 +112,14 @@ def signals(video):
     n = len(raw) // (sw * sh)
     f = np.frombuffer(raw, np.uint8)[:n * sw * sh].reshape(n, sh, sw).astype(np.int16)
     full = (f > 90).sum(axis=(1, 2)).astype(float)
-    # tight band on JUST the input line (above the status line), baseline-subtracted
-    # so the constant status line cancels and only typed text lights it up. Response
-    # output renders higher, so it stays out of this band.
-    r0, r1 = int(0.84 * sh), int(0.905 * sh)
+    # AUTO-LOCATE the input line: it's the most temporally-DYNAMIC band in the
+    # bottom region (typing swings its brightness hardest), while the status line
+    # is near-constant and the BG baseline is uniform. So no hand-tuned band is
+    # needed across font sizes / terminal heights — pick the bottom variance peak.
+    rng = (f.max(axis=0) - f.min(axis=0)).mean(axis=1)          # per-row dynamic range
+    lo, hi = int(0.80 * sh), int(0.95 * sh)
+    peak = lo + int(np.argmax(rng[lo:hi]))
+    r0, r1 = max(0, peak - int(0.03 * sh)), min(sh, peak + int(0.035 * sh))
     band = f[:, r0:r1, :]
     base = band.min(axis=0, keepdims=True)            # per-pixel idle baseline
     inp = ((band - base) > 45).sum(axis=(1, 2)).astype(float)   # NEW bright pixels
