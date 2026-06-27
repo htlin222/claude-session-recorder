@@ -36,6 +36,21 @@ loop-engineering 套到「拍 claude 自己」這條非決定性路徑上。
 → 「先講解、動作釘句界」（v2/v4）的精神保留；差別是這裡**畫面不動、語音去 fit 真實
 時間軸**，而非 CLI-lesson 的「語音釘畫面」（那邊輸出決定性，可反過來）。
 
+### 核心原則：聲音先行，瞬間輸出「唸完才出現」
+
+凡是**瞬間出現**的畫面內容（指令、flag、任何一次打完的 token —— 不限 claude），
+一律 **先唸旁白、唸完該段才讓它出現**，不可邊打邊講或先打後講。理由：打字是瞬間的，
+若先出現就等於「還沒解釋觀眾已看到」，旁白變成事後補充。
+
+決定性作法（launch flag 即用此）：tape 每個 beat 排成
+`Sleep(旁白時長) → Type(token) → Sleep(breath)`；overlay 把該段旁白 onset 放在槽起點，
+token 落在 `onset + 旁白時長`（唸完的瞬間）。實證：唸「claude」時畫面是空 prompt，唸完
+才出現 `claude`；唸「--model opus」時只見 `claude`，唸完才出現該 flag。
+
+**與逐字打字的 prompt 區分**：prompt 是 demo 內容、逐字慢打可見，沿用「intro 先行 →
+再打字」即可（intro 是解釋、prompt 本身是被示範的動作）。本原則只管**瞬間 token**。
+未來若要逐 flag 高亮 prompt 內的 token，沿用同一 `Sleep(say) → Type(token)` 機制。
+
 ## 流程（使用者定義）：設計操作 → 實際執行 → 配旁白 → loop until align
 
 ```
