@@ -52,9 +52,13 @@ fail; if they do it's a placement bug.
 
 ## The opening is a CLI lesson
 The `launch` block treats starting `claude` like the repo's rsync/jq lessons:
-the command is typed **token-by-token**, each flag **held on screen while its own
-narration plays** (sync-model v5 hero-command pacing), and what's narrated is
-exactly what's typed and run (`base` + each flag's `arg`). Example:
+the command is built **flag-by-flag**, and **the voice leads — each flag is
+narrated FIRST, then the token appears** (the tape runs `Sleep(say) ->
+Type(token) -> Sleep(breath)`). Since typing is instant, a token must not show
+until it's been explained; never type-then-narrate. This is the core principle
+in `docs/plans/2026-06-27-claude-session-voiceover-sync-design.md` and applies to
+any instant output (command/flag/one-shot token), not just `claude`. What's
+narrated is exactly what's typed and run (`base` + each flag's `arg`). Example:
 ```json
 "launch": {
   "base": "claude",
