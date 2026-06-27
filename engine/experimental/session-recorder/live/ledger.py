@@ -72,3 +72,20 @@ def load(path):
 def save(path, led):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(led, f, ensure_ascii=False, indent=2)
+
+
+def output_timeline(segments):
+    """Map ordered raw segments to output time. A hard segment defaults to its
+    raw length (copied verbatim); a soft segment uses its chosen out_dur. Returns
+    each segment with an added `out: [start, end]` in output time."""
+    out, cursor = [], 0.0
+    for s in segments:
+        if "out_dur" in s and s["out_dur"] is not None:
+            d = s["out_dur"]
+        else:
+            d = s["raw"][1] - s["raw"][0]
+        seg = dict(s)
+        seg["out"] = [round(cursor, 3), round(cursor + d, 3)]
+        out.append(seg)
+        cursor += d
+    return out
