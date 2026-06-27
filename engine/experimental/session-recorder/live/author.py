@@ -45,11 +45,6 @@ def _dur(path):
          "-of", "csv=p=0", path], capture_output=True, text=True).stdout or 0)
 
 
-def soft_len_lead(voice_dur):
-    """A lead beat's soft slot must hold the voice + the lead gap + a breath."""
-    return round(voice_dur + INTRO_GAP + BREATH, 3)
-
-
 def fit_ride(voice_dur, gap, first_clause_dur=None):
     """Tier-2 think rides the measured hard gap. Keep if it fits gap-THINK_GUARD;
     else trim (caller re-synths the trimmed clause); drop only if even the first
@@ -60,14 +55,6 @@ def fit_ride(voice_dur, gap, first_clause_dur=None):
     if first_clause_dur is not None and first_clause_dur > budget + 0.1:
         return {"drop": True, "dur": 0.0}
     return {"drop": False, "dur": round(budget, 3)}   # trim to budget
-
-
-def fit_soft_droppable(voice_dur, room):
-    """Tier-3 outro/close: keep at full length if `room` holds it plus a breath;
-    else drop."""
-    if room >= voice_dur + BREATH:
-        return {"drop": False, "dur": round(voice_dur, 3)}
-    return {"drop": True, "dur": 0.0}
 
 
 def fit_think(text, mp3, budget, demo, idx):
@@ -150,6 +137,10 @@ def build_ledger(demo, script, anchors, write=True):
         return 0.0 if not durs else sum(durs) + BREATH * (len(durs) - 1)
 
     # ---- size each soft segment -------------------------------------------
+    # Leads (intro / outro / launch / close) are ALWAYS stretch-hosted: a soft
+    # segment freeze-extends with no upper bound, so every lead is placed in full
+    # and NONE is ever dropped — there is no Tier-3 drop in v6. Sizing below just
+    # computes how long each soft slot must hold to fit its lead beats + breaths.
     for s in segs:
         raw_len = round(s["raw"][1] - s["raw"][0], 3)
         if s["kind"] == "hard":
@@ -217,6 +208,10 @@ def build_ledger(demo, script, anchors, write=True):
             add("intro", i, itxt, ic, istart, idur, pt(typing_out), "lead", 1)
         thc, thdur, thtxt = tv[i]
         if thc:                                        # think RIDES [submit, done]
+            # think is the ONLY droppable beat. fit_ride makes the keep/trim
+            # decision against the measured gap; the actual DROP is decided below,
+            # after the fit_think re-synth (write=True), when even the first clause
+            # still overruns the gap.
             sub_out = typing_out + (h.get("submit", h["raw"][0]) - h["raw"][0])
             done_out = h["out"][1]
             gap = done_out - sub_out
@@ -224,7 +219,10 @@ def build_ledger(demo, script, anchors, write=True):
             if fr["drop"]:
                 add("think", i, thtxt, thc, sub_out, 0.0, (sub_out, done_out), "ride", 2, drop=True)
             elif fr["dur"] < thdur - 0.05 and write:
-                # trimmed: re-synth a clause-trimmed clip that actually fits
+                # trimmed: re-synth a clause-trimmed clip that actually fits.
+                # (write=False dry-run skips this and falls to the else: the clip
+                # path stays full-length while dur is the trimmed budget —
+                # intentional, dry-run is test-only and never muxes the clip.)
                 budget = max(0.5, gap - THINK_GUARD)
                 ntext, nmp3, ndur, _ = fit_think(thtxt, os.path.join(demo, thc),
                                                  budget, demo, i)
