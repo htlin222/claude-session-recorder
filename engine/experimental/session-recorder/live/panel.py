@@ -354,7 +354,9 @@ def main():
             "20",
             "-vsync",
             "cfr",
-            panel_mp4,
+            "-t",
+            f"{vtot:.3f}",          # the concat's trailing-repeat frame overshoots
+            panel_mp4,              # under CFR; cap the panel at the ledger total
         ],
         check=True,
         capture_output=True,
@@ -391,6 +393,8 @@ def main():
             "aac",
             "-b:a",
             "192k",
+            "-t",
+            f"{vtot:.3f}",          # end exactly with the terminal+audio (no dead tail)
             out,
         ],
         check=True,

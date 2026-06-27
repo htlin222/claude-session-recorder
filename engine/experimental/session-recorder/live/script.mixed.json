@@ -1,0 +1,33 @@
+{
+  "_comment": "v6 stress/deliverable scenario: a CLI-lesson launch (claude built flag-by-flag) flowing into a MIXED claude session — turn 1 writes a file (tool use), turn 2 is a pure-text concept Q&A (no tools), turn 3 edits + tests (mixed). Proves the workflow is stable across turn types. See docs/plans/2026-06-28-event-ledger-deterministic-pipeline-design.md.",
+  "launch": {
+    "base": "claude",
+    "flags": [
+      {"arg": "--model opus", "say": "指定 model 為 opus，用最強的模型示範。", "note": "選用 Opus 模型。"},
+      {"arg": "--permission-mode bypassPermissions", "say": "權限模式設成 bypass，讓它自動執行、不逐次詢問。", "note": "略過權限詢問，示範時自動執行。"}
+    ],
+    "intro": "我們直接用 claude 啟動一個互動式 session。",
+    "outro": "稍候就進入它的互動畫面。"
+  },
+  "close": "這次示範從 CLI 啟動，到請 Claude 寫程式、回答觀念、再補上測試，整條流程一氣呵成。",
+  "turns": [
+    {
+      "prompt": "write a Python script primes.py that prints all prime numbers up to n",
+      "intro": "先請 Claude 寫一支印出 n 以內所有質數的 Python 程式。",
+      "think": "它正在用試除法組出迴圈，把每個數對較小的數取餘數來判斷是不是質數。",
+      "outro": "primes.py 完成了，可以正確印出指定範圍內的質數。"
+    },
+    {
+      "prompt": "in one sentence, explain why the Sieve of Eratosthenes is faster than trial division",
+      "intro": "接著問它一個觀念題：為什麼埃式篩法會比試除法快。",
+      "think": "它在比較兩種做法的時間複雜度差異。",
+      "outro": "它用一句話點出篩法省去重複試除，整體更接近線性時間。"
+    },
+    {
+      "prompt": "now add a docstring to primes.py and a simple test",
+      "intro": "最後請它替 primes.py 補上說明文件，並加一個簡單的測試。",
+      "think": "它在補 docstring，並寫一段驗證輸出的測試，然後執行確認。",
+      "outro": "測試通過，這支質數程式就完成並驗證過了。"
+    }
+  ]
+}
