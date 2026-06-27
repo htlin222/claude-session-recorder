@@ -101,10 +101,13 @@ downstream stage reads numbers that match the frames** — `overlay.py`'s voice 
 `session.srt`, and `panel.py`'s keyframes are all driven off the same reconciled
 ledger. No re-record.
 
-### v5 retirement (pending Task 12)
+### v5 retired
 The v5 files (`gen_session_tape.py`, `session_overlay.py`, `session_panel.py`,
-`verify_session.py`, `validate_sync.py`) remain alongside v6 until the Task 12
-validation passes on real scenarios; they are removed once v6 is confirmed.
+`verify_session.py`, `validate_sync.py`) have been **removed** — v6 passed the
+end-to-end validation (lint PASS, `claude` launched once, left-terminal ==
+right-panel == narration confirmed on the file-writing + text-Q&A + mixed
+scenario in `script.mixed.json`). v6's `detect_anchors.py` carries a verbatim copy
+of v5's `signals()`/`detect_turns()`, so nothing of the detection was lost.
 
 ## How detection survives response-heavy multi-turn sessions
 Naively thresholding the input band breaks when a session has several file-writing
@@ -116,8 +119,9 @@ sits MODERATELY bright. So `detect_turns` takes the contiguous runs where the
 (tight, auto-located) band exceeds HALF its max — exactly the N submissions —
 and derives `typing_start` from the tape's known typing duration. `done` is the
 last full-frame content jump before the next submit (absorbs long think gaps).
-Validated across text-Q&A, single-tool, and 3-turn file-writing recordings; run
-`validate_sync.py` on anything new.
+Validated across text-Q&A, single-tool, and 3-turn file-writing recordings. This
+logic lives verbatim in `detect_anchors.py` now; run `lint.py --demo <demo>`
+(the deterministic gate) on anything new.
 
 ## The opening is a CLI lesson
 The `launch` block treats starting `claude` like the repo's rsync/jq lessons:
