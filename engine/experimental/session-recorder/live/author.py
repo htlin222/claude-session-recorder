@@ -178,7 +178,7 @@ def build_ledger(demo, script, anchors, write=True):
     def add(kind, ti, text, clip_rel, vstart, vdur, vis, mode, tier, drop=False):
         beats.append({
             "id": beat_id(kind, ti, text), "kind": kind, "turn_idx": ti,
-            "tier": tier, "mode": mode, "drop": drop,
+            "text": text, "tier": tier, "mode": mode, "drop": drop,
             "voice": (None if (drop or not clip_rel) else
                       {"clip": clip_rel, "start": round(vstart, 3), "end": round(vstart + vdur, 3)}),
             "visual": {"start": round(vis[0], 3), "end": round(vis[1], 3)},
