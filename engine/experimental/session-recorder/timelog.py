@@ -38,16 +38,47 @@ def detail(d):
     }.get(ev, "")
 
 
+def last_assistant_message(path):
+    """The final assistant message in the transcript — at Stop time this is the
+    turn's conclusion (the MOST important thing to narrate). Tolerant of schema."""
+    try:
+        msgs = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    except Exception:                           # noqa: BLE001
+        return ""
+    for m in reversed(msgs):
+        msg = m.get("message") if isinstance(m.get("message"), dict) else m
+        role = m.get("type") or msg.get("role") or m.get("role")
+        if role != "assistant":
+            continue
+        c = msg.get("content")
+        if isinstance(c, str) and c.strip():
+            return c.strip()
+        if isinstance(c, list):
+            txt = " ".join(b.get("text", "") for b in c
+                           if isinstance(b, dict) and b.get("type") == "text").strip()
+            if txt:
+                return txt
+    return ""
+
+
 def main():
     try:
         d = json.load(sys.stdin)
     except Exception:                           # noqa: BLE001
         d = {}
+    ev = d.get("hook_event_name", "unknown")
     rec = {
         "t": round(time.time(), 3),
-        "event": d.get("hook_event_name", "unknown"),
+        "event": ev,
         "detail": detail(d),
     }
+    tp = d.get("transcript_path")
+    if tp:
+        rec["transcript"] = tp                  # full content lives here, per event
+        if ev in ("Stop", "SubagentStop"):
+            msg = last_assistant_message(tp)
+            if msg:
+                rec["message"] = msg            # ★ the turn's final message
     try:
         with open(LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
