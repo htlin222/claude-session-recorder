@@ -27,10 +27,12 @@ def test_capture_plan_lists_launch_tokens(tmp_path):
     assert plan["launch"]["tokens"] == ["claude", "--model opus"]
 
 
-def test_tape_isolates_the_shell_via_zdotdir(tmp_path):
-    # regression: VHS's zsh must use the sandbox's clean ZDOTDIR so the user's
-    # powerlevel10k never dumps its `${_p9k_…}` config as full-screen text
-    # (which uglified the frame and broke detect_turns with false submissions).
+def test_tape_overrides_inherited_prompt(tmp_path):
+    # regression: VHS defaults to bash and inherits the EXPORTED p10k `PS1`,
+    # rendering it as full-screen `${_p9k_…}` garbage that uglified the frame and
+    # broke detect_turns with false submissions. The tape MUST override PS1/PROMPT
+    # (the verified fix) regardless of shell; ZDOTDIR is kept as zsh defense.
     tape, _plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
                            font_size=26, word_delay=220)
-    assert 'Env ZDOTDIR' in tape and 'zdotdir' in tape
+    assert 'Env PS1' in tape and 'Env PROMPT' in tape
+    assert 'Env ZDOTDIR' in tape

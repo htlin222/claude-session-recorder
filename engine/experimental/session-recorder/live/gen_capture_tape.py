@@ -60,12 +60,15 @@ def render(spec, demo, width, height, font_size, word_delay,
     a('Env VHS_DEMO "1"')
     a(f'Env CLAUDE_CONFIG_DIR "{cfg}"')
     a(f'Env VHS_TIMELINE "{timeline}"')
-    # isolate the SHELL too: point ZDOTDIR at the sandbox's clean .zshrc so the
-    # user's powerlevel10k (or any heavy prompt) never loads. In VHS's non-TTY
-    # PTY p10k's instant-prompt dumps its raw `${_p9k_…}` config as full-screen
-    # text at boot AND at Ctrl+C exit — which both (a) uglify the opening/closing
-    # frames and (b) read as two extra full-bright "prompt submissions" that
-    # break detect_turns. A minimal prompt keeps the frame clean and detection honest.
+    # Clean SHELL PROMPT. The killer: VHS defaults to bash, which inherits the
+    # EXPORTED zsh-syntax `PS1` from the p10k shell this runs in and renders it as
+    # literal `${_p9k_…}` garbage full-screen at boot AND on Ctrl+C exit — both
+    # uglifying the opening/closing frames and reading as two extra full-bright
+    # "prompt submissions" that break detect_turns (4 detected vs 2). Overriding
+    # PS1/PROMPT in the tape kills the dump regardless of which shell VHS picks.
+    # ZDOTDIR (clean .zshrc) is kept as defense-in-depth for the zsh path.
+    a('Env PS1 "❯ "')
+    a('Env PROMPT "❯ "')
     a(f'Env ZDOTDIR "{os.path.join(cfg, "zdotdir")}"')
     a("")
     a(f"Sleep {PRELUDE:.0f}s                   # let the shell prompt settle")
