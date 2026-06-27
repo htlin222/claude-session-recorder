@@ -30,6 +30,14 @@ python3 engine/experimental/session-recorder/gen_voiceover.py --audio    # + ses
 is the same lines synthesized and placed at their timecodes on one track. Pair the
 mp3/srt with a screen recording of the session for a fully explained replay.
 
+## Live filming (VHS) — `live/`
+This folder narrates a session you ran yourself (post-hoc). To instead **film**
+a real `claude` TUI on a script — launch it, drive prompts, wait on a turn-done
+sentinel, record `terminal.mp4` — use **`live/`**, which reuses `timelog.py` and
+`gen_voiceover.py` and adds the clean-recording sandbox + on-screen sentinel.
+Filming a real session is impossible without that sandbox (focus mode hides the
+sentinel, dialogs block startup); `live/README.md` documents every trap.
+
 ## Notes
 - Non-blocking & safe: `timelog.py` always exits 0; remove the `hooks` block from
   `.claude/settings.json` to stop recording.

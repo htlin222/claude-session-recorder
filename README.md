@@ -21,7 +21,8 @@ engine/                 canonical render engine (TEMPLATE / source-of-truth)
   src/  clipkit.py(S/R/CLR + load_lesson) build.py overlay.py verify_sync.py
         bundle.py envcheck.py
   config.toml  lesson.skel.py  CLAUDE.tmpl.md  context/(sync-model etc)
-  experimental/         slideshow/ (mdp), nvim/ (recipe), session-recorder/ (hooks)
+  experimental/         slideshow/ (mdp), nvim/ (recipe), session-recorder/ (hooks
+                        + live/ = sandbox + sentinel + tape-gen for filming claude)
 <slug>/                 a PORTABLE clip: vendored src/ + lesson.py + config.toml +
                         setup.sh + CLAUDE.md + <slug>.mp4/.srt/.html + provenance/
 .claude/
@@ -119,6 +120,15 @@ the *next* clip. A fixable desync auto-heals (guided/threshold clears → re-ove
   hook's **last assistant message** is the turn's conclusion (the headline to narrate).
 - Settings are read at **startup** → new hooks apply to a *fresh* session, not the
   running one.
+- **FOCUS MODE HIDES hook `systemMessage`s.** A Stop hook that prints an on-screen
+  sentinel (the VHS turn-done marker) renders *nothing* if the session is in focus
+  mode → every `Wait+Screen /sentinel/` times out. This is why live recording
+  **must** use the isolated sandbox (`live/claude_sandbox.sh`), whose fresh
+  `CLAUDE_CONFIG_DIR` starts with focus off. Same dir also kills the Chrome-extension
+  dialog (`cachedChromeExtensionInstalled:false`), the unavailable-model banner
+  (`model:opus`), and MCP/CLAUDE.md noise. See `engine/experimental/session-recorder/live/`.
+- **`--dangerously-skip-permissions` for scripted runs** — `acceptEdits` auto-accepts
+  edits but a turn that *runs* what it wrote hits a Bash prompt and hangs the tape.
 
 ### git / portability
 - **`build/` is in most global gitignores** → the provenance folder is named
@@ -136,10 +146,15 @@ the *next* clip. A fixable desync auto-heals (guided/threshold clears → re-ove
 ## Roadmap — the "majestic Claude Code tutorial"
 We have the teaching scaffolding. The remaining piece is filming Claude Code
 *itself* live. Plan (VHS-based, reuses everything):
-1. **Stop sentinel** — `timelog.py` prints a marker on Stop so VHS can `Wait` on it.
-2. **Session tape** — launch `claude`, drive prompts, `Wait@timeout /sentinel/`
-   between turns (no guessed `Sleep`); VHS records the real TUI.
-3. **overlay "session mode"** — anchor the panel to the **hook timecodes** (not
+1. ✅ **Stop sentinel** — `live/vhs_stop_sentinel.sh` prints `VHS_TURN_DONE_N` on
+   Stop so VHS can `Wait` on a specific turn (complements `timelog.py`, which logs
+   the JSONL timeline but emits nothing on screen).
+2. ✅ **Session tape** — `live/gen_session_tape.py` launches `claude` in the
+   **isolated sandbox** (`live/claude_sandbox.sh`), drives prompts, and
+   `Wait@timeout /sentinel/` between turns (no guessed `Sleep`); VHS records the
+   real TUI → `terminal.mp4`. The sandbox is what makes this filmable at all —
+   see `live/README.md` for the four config traps it defeats (focus mode first).
+3. ⏳ **overlay "session mode"** — anchor the panel to the **hook timecodes** (not
    clear-detection) and use the **event / Stop-message** panel; narration from
    `gen_voiceover.py`. (A course-assembly/montage layer is a later nicety.)
 

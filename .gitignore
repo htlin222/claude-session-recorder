@@ -44,3 +44,8 @@ engine/experimental/nvim/code.py
 engine/experimental/session-recorder/session-timeline.jsonl
 engine/experimental/session-recorder/session-voiceover.*
 engine/experimental/session-recorder/_seg/
+
+# live/ recording sandboxes CONTAIN REAL CREDENTIALS (<demo>/.cfg/.credentials.json).
+# Stage them under /tmp (outside the repo); this is a belt-and-suspenders guard
+# in case one is ever created inside the tree. terminal.mp4 is covered by *.mp4.
+.cfg/
