@@ -47,8 +47,9 @@ loop-engineering 套到「拍 claude 自己」這條非決定性路徑上。
 
 ### loop 是雙層
 
-- **內層（調語音，不重錄，便宜）**：某段語音塞不進它的真實 gap → 自動 `atempo` 微調語速／
-  裁句／挪位 → 重驗。
+- **內層（調內容，不重錄，便宜）**：think 語音塞不進真實 gap → **先改旁白內容**（把 think
+  裁到能塞進 gap 的最長句界前綴、用自然語速重新合成）→ 重驗。**不要用 `atempo` 壓縮音檔** —
+  那會讓 think 突然變快、跟正常語速的 intro/outro 一聽就突兀。
 - **外層（調 tape，重錄）**：硬軸結構性太短（claude 秒回、think 槽 1s 但旁白要 6s）→
   加大 tape 的 intro `Sleep`／改寫短 think 句／改 prompt → 重錄 → 回 ③。
 
@@ -70,8 +71,8 @@ loop-engineering 套到「拍 claude 自己」這條非決定性路徑上。
 4. **`session_overlay.py`（新）**：核心對齊器。輸入 `terminal.mp4 + plan.json +
    session-timeline.jsonl + 語音片段`。對每 turn：
    - intro 語音擺在 `plan.intro_slot.start`（決定性，必早於打字）。
-   - think 語音擺在真實 `Enter→Stop` 區間起點；若語音比硬軸 gap 長 → 內層 `atempo` 壓到
-     `gap - safety`（或標記需重錄）。
+   - think 語音擺在真實 `Enter→Stop` 區間起點；若語音比硬軸 gap 長 → 內層**裁短內容**
+     （句界前綴）重新合成成自然語速，塞進 `gap - safety`；連第一句都塞不下才標記需重錄。
    - outro 語音擺在真實 `Stop` 之後（住軟槽④，必塞得下）。
    - 用 `adelay+amix`（沿用 build/overlay 慣例）組全域音軌；輸出 `.srt`、`timeline.json`。
    - **畫面不 freeze/trim**（與舊設計差異）—— 真實錄影原樣保留。
@@ -83,7 +84,7 @@ loop-engineering 套到「拍 claude 自己」這條非決定性路徑上。
 1. **語音先行（新，核心）** — 每 turn `intro.onset < typing.onset`。違反 = FAIL。這條
    結構性保證「命令先跑」再也不會發生。
 2. **think 落在硬軸內** — `Enter <= think.onset` 且 `think.onset + think.dur <= Stop + tol`。
-   超出（含 `atempo` 後仍超）→ FAIL_FIXABLE（外層：加大停頓/改短句重錄）。
+   超出（裁到第一句後仍超 → claude 秒回）→ FAIL_FIXABLE（外層：改短 think 句或加大 prompt 重錄）。
 3. **旁白沒溢出** — 沿用 v6 `min_gap`（每段語音在自己槽內講完）。
 4. **成品長度 >= 旁白總長**（沿用）。
 

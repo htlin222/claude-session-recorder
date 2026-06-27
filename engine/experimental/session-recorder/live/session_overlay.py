@@ -29,12 +29,15 @@ Needs numpy (run with the repo venv: .venv/bin/python session_overlay.py ...).
 import argparse
 import json
 import os
+import re
 import subprocess
 
 import numpy as np
 
 FF = "/opt/homebrew/bin/ffmpeg"
 FPS = 12.5
+VOICE = "zh-TW-HsiaoChenNeural"
+RATE = "+0%"
 THINK_GUARD = 0.3       # keep this much of the real gap free after the think voice
 INTRO_GAP = 0.3         # silence between intro voice end and typing start
 OPEN_GAP = 0.3          # margin around the open clip
@@ -44,6 +47,44 @@ def dur(path):
     return float(subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "csv=p=0", path], capture_output=True, text=True).stdout or 0)
+
+
+def synth(text, out_mp3):
+    subprocess.run(["edge-tts", "--voice", VOICE, "--rate", RATE,
+                    "--text", text, "--write-media", out_mp3],
+                   check=True, capture_output=True)
+    return dur(out_mp3)
+
+
+def fit_think(text, mp3, budget, demo, idx):
+    """Make the think narration fit `budget` seconds by SHORTENING THE CONTENT at
+    a clause boundary (。！？，、) — natural speech, never time-compressed (atempo
+    would suddenly speed the voice up and sound off). Returns (text, mp3, dur,
+    trimmed): the longest leading clause-prefix that fits. If even the first
+    clause overruns, returns it anyway with trimmed=True so verify flags it."""
+    base = dur(mp3)
+    if base <= budget:
+        return text, mp3, round(base, 3), False
+    clauses = [c for c in re.split(r"(?<=[。！？，、])", text) if c]
+    best = None
+    for k in range(1, len(clauses) + 1):
+        cand = "".join(clauses[:k]).rstrip("，、")
+        if not cand.endswith(("。", "！", "？")):
+            cand += "。"
+        out = os.path.join(demo, "_voice", f"think_{idx}_fit.mp3")
+        d = synth(cand, out)
+        if d <= budget:
+            best = (cand, out, round(d, 3))      # keep growing while it still fits
+        else:
+            break
+    if best:
+        return best[0], best[1], best[2], True
+    # even one clause overruns: synth the first clause, flag it (FAIL_FIXABLE)
+    cand = clauses[0].rstrip("，、")
+    if not cand.endswith(("。", "！", "？")):
+        cand += "。"
+    out = os.path.join(demo, "_voice", f"think_{idx}_fit.mp3")
+    return cand, out, round(synth(cand, out), 3), True
 
 
 def srt_ts(s):
@@ -160,15 +201,16 @@ def main():
         if tn["intro"]["dur"]:
             segs.append(("intro", tn["intro"]["text"], intro_onset,
                          tn["intro"]["dur"], os.path.join(demo, tn["intro"]["mp3"]), 1.0))
-        # think: rides the real gap; compress if it would overrun
-        th, atempo = tn["think"]["dur"], 1.0
-        if th:
+        # think: rides the real gap. If the authored line overruns, SHORTEN THE
+        # CONTENT to fit (natural speech) — never time-compress (that suddenly
+        # speeds the voice and sounds off against the normal-rate intro/outro).
+        th_text, th_dur, th_trim = tn["think"]["text"], tn["think"]["dur"], False
+        if th_dur:
             budget = max(0.5, gaps[i] - THINK_GUARD)
-            if th > budget:
-                atempo = round(min(2.0, th / budget), 3)
-                th = round(th / atempo, 3)
-            segs.append(("think", tn["think"]["text"], submit, th,
-                         os.path.join(demo, tn["think"]["mp3"]), atempo))
+            th_text, th_mp3, th_dur, th_trim = fit_think(
+                tn["think"]["text"], os.path.join(demo, tn["think"]["mp3"]),
+                budget, demo, tn["index"])
+            segs.append(("think", th_text, submit, th_dur, th_mp3, 1.0))
         # outro: over the finished response
         if tn["outro"]["dur"]:
             segs.append(("outro", tn["outro"]["text"], stop, tn["outro"]["dur"],
@@ -176,9 +218,10 @@ def main():
         sync["turns"].append({
             "index": tn["index"], "typing_start": typing_start, "submit": submit,
             "stop": stop, "intro_onset": intro_onset, "real_gap": gaps[i],
-            "think_atempo": atempo,
+            "think_dur": round(th_dur, 3), "think_trimmed": th_trim,
+            "think_text": th_text,
             "voice_leads_typing": round(intro_onset + tn["intro"]["dur"], 3) <= typing_start,
-            "think_fits_gap": round(th, 3) <= round(gaps[i] - THINK_GUARD + 0.05, 3),
+            "think_fits_gap": round(th_dur, 3) <= round(gaps[i] - THINK_GUARD + 0.05, 3),
         })
 
     # close: over the ending, AFTER the last placed voice finishes (the last
@@ -230,9 +273,9 @@ def main():
     print(f"wrote {srt}  ({len(segs)} cues)")
     print(f"ready={ready}s  voice_leads_typing={leads}  think_fits_gap={fits}")
     for t in sync["turns"]:
+        trim = "  [think trimmed to fit]" if t["think_trimmed"] else ""
         print(f"  turn {t['index']}: intro@{t['intro_onset']:.1f} type@{t['typing_start']:.1f} "
-              f"submit@{t['submit']:.1f} stop@{t['stop']:.1f} gap={t['real_gap']:.1f} "
-              f"atempo={t['think_atempo']}")
+              f"submit@{t['submit']:.1f} stop@{t['stop']:.1f} gap={t['real_gap']:.1f}{trim}")
     if "open_onset" in sync:
         print(f"  open@{sync['open_onset']:.1f}  close@{sync.get('close_onset','-')}")
 

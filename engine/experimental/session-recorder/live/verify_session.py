@@ -28,13 +28,15 @@ def main():
     neg = [t for t in turns if t["intro_onset"] < 0] + (
         [{"index": "open"}] if s.get("open_onset", 0) < 0 else [])
 
+    trimmed = [t for t in turns if t.get("think_trimmed")]
     print(f"session sync: {len(turns)} turns, video {s['video_total']}s, claude-ready {s['ready']}s")
     for t in turns:
         flag = "" if (t["voice_leads_typing"] and t["think_fits_gap"]) else "  <-- "
         flag += "" if t["voice_leads_typing"] else "VOICE-TRAILS "
-        flag += "" if t["think_fits_gap"] else f"THINK-OVERRUNS(gap {t['real_gap']}s, atempo {t['think_atempo']})"
+        flag += "" if t["think_fits_gap"] else f"THINK-OVERRUNS even shortened (gap {t['real_gap']}s)"
+        note = "  [think auto-shortened to fit]" if (t.get("think_trimmed") and t["think_fits_gap"]) else ""
         print(f"  turn {t['index']}: lead<type={t['voice_leads_typing']} "
-              f"think_fits={t['think_fits_gap']} gap={t['real_gap']}s{flag}")
+              f"think_fits={t['think_fits_gap']} gap={t['real_gap']}s{flag}{note}")
     if "open_onset" in s:
         print(f"  open @ {s['open_onset']}s   close @ {s.get('close_onset','-')}s")
 
@@ -47,11 +49,15 @@ def main():
               f"placement bug.")
         raise SystemExit(2)
     if unfit:
-        print(f"\nFAIL (fixable): {len(unfit)} turn(s) whose think voice overruns the real "
-              f"gap even compressed. Shorten those think lines (or make the prompt take "
-              f"longer) and re-record. Turns: {[t['index'] for t in unfit]}")
+        print(f"\nFAIL (fixable): {len(unfit)} turn(s) whose think line overruns the gap "
+              f"even after shortening to its first clause — claude answered too fast. "
+              f"Rewrite a shorter think line (or make the prompt take longer) and re-record. "
+              f"Turns: {[t['index'] for t in unfit]}")
         raise SystemExit(1)
-    print("\nPASS: voice leads every prompt; every think voice fits its gap.")
+    msg = "PASS: voice leads every prompt; every think line fits its gap"
+    if trimmed:
+        msg += f" ({len(trimmed)} auto-shortened to fit: turns {[t['index'] for t in trimmed]})"
+    print(f"\n{msg}.")
 
 
 if __name__ == "__main__":
