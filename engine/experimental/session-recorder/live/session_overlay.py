@@ -192,20 +192,19 @@ def main():
             "regions": regions, "turns": []}
 
     # open: narrate the LAUNCH as separate per-flag beats (not one dense clip).
-    # The launch is the FIRST thing in the tape and paced deterministically, so
-    # each beat's video time is known: beat0 (intro) leads the base token; each
-    # flag beat starts when that flag is typed; the outro plays during boot.
+    # VOICE LEADS each token: the tape narrates a flag, THEN types it, so the
+    # narration onset is the start of its slot and the token appears at onset+dur.
+    # The launch is the first thing in the tape and paced deterministically, so
+    # every beat onset is known by walking the fixed slots from `prelude`.
     prelude = plan.get("prelude", 2.0)
     beats = op.get("beats", [])
-    open_lead = op.get("open_lead", 0.6)
     beat_gap = op.get("beat_gap", 0.6)
-    cursor = prelude + open_lead               # where the base token is typed
+    cursor = prelude
     for k, b in enumerate(beats):
-        onset = prelude if k == 0 else cursor  # beat0 leads the base by open_lead
         if b.get("dur"):
-            segs.append((f"open{k}", b["text"], round(onset, 3), b["dur"],
+            segs.append((f"open{k}", b["text"], round(cursor, 3), b["dur"],
                          os.path.join(demo, b["mp3"]), 1.0))
-        cursor += b.get("dur", 0.0) + beat_gap
+        cursor += b.get("dur", 0.0) + beat_gap   # narrate, type (instant), breath
     # open outro ("…進入互動畫面") plays at Enter, through boot, into the entry
     # screen — but turn 1 may start right after a fast boot, leaving little room.
     # FIT it to the window before turn-1's intro (content-trim), or DROP it if

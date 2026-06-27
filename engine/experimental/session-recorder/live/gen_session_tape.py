@@ -90,14 +90,17 @@ def emit(spec, demo, voice_dir, theme, font_size, width, height,
     beats = [(lc.get("base", "claude"), lc.get("intro", ""))]
     for f in lc.get("flags", []):
         beats.append((f["arg"], f.get("say", "")))
-    a(f"Sleep {OPEN_LEAD:.3f}s          # OPEN: voice leads the launch typing")
+    # VOICE-LEADS each flag: narrate it FIRST, then the token is typed (it appears
+    # the instant the narration ends — typing is instant, so the text must not show
+    # until we've explained it). Same rule for every command/flag, claude or not.
     beat_meta, tokens = [], []
     for ti, (tok, say) in enumerate(beats):
         tokens.append(tok)
-        a(f'Type "{tok}"' if ti == 0 else f'Type " {tok}"')
         mp3 = os.path.join(voice_dir, f"open_beat{ti}.mp3")
         d = synth(say, mp3) if say else 0.0
-        a(f"Sleep {d + BEAT_GAP:.3f}s   # hold `{tok}` while its narration plays ({d:.2f}s)")
+        a(f"Sleep {d:.3f}s   # narrate `{tok}` ({d:.2f}s) — token not shown yet")
+        a(f'Type "{tok}"' if ti == 0 else f'Type " {tok}"')   # appears AFTER narration
+        a(f"Sleep {BEAT_GAP:.3f}s   # breath before the next flag")
         beat_meta.append({"text": say, "token": tok,
                           "mp3": os.path.relpath(mp3, demo) if d else "", "dur": d})
     a("Enter")
