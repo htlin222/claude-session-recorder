@@ -109,19 +109,23 @@ def detect_turns(full, inp, n, turns, pre_enter):
 
 
 def raw_segments(ready, turns, vtot):
-    """Partition raw-video time. The launch/boot [0,ready] is kept VERBATIM
-    (real startup animation, never frozen). Idle regions (post-boot before the
-    first prompt, post-response settle, tail) are SOFT (freeze-stretchable). The
-    typing->submit->done windows are HARD (verbatim)."""
+    """Partition raw-video time into MONOTONIC, non-overlapping segments. boot
+    [0,ready] is the launch animation (verbatim); each turn's [typing_start,done]
+    is hard (verbatim); idle gaps + tail are soft (freeze-stretchable). typing_start
+    is a tape ESTIMATE (submit - type_dur - pre_enter) and can fall before `ready`
+    or a previous `done`, so every boundary is clamped to the running cursor — a
+    degenerate (zero-length) soft gap is allowed (splice freezes a single frame)."""
+    ready = max(0.0, ready)
     segs = [{"kind": "boot", "raw": [0.0, ready], "role": "boot"}]
     cursor = ready
     for i, t in enumerate(turns):
-        segs.append({"kind": "soft", "raw": [cursor, t["typing_start"]],
-                     "role": "pre", "turn_idx": i})
-        segs.append({"kind": "hard", "raw": [t["typing_start"], t["done"]],
-                     "turn_idx": i, "submit": t["submit"]})
-        cursor = t["done"]
-    segs.append({"kind": "soft", "raw": [cursor, vtot], "role": "tail"})
+        ts = max(t["typing_start"], cursor)          # can't type before ready/prev done
+        done = max(t["done"], ts)                     # monotonic
+        segs.append({"kind": "soft", "raw": [cursor, ts], "role": "pre", "turn_idx": i})
+        segs.append({"kind": "hard", "raw": [ts, done], "turn_idx": i,
+                     "submit": min(max(t["submit"], ts), done)})
+        cursor = done
+    segs.append({"kind": "soft", "raw": [cursor, max(cursor, vtot)], "role": "tail"})
     return segs
 
 

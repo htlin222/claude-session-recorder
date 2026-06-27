@@ -32,3 +32,7 @@ def test_splice_output_duration_matches_plan(tmp_path):
     out = str(tmp_path / "terminal.mp4")
     assert os.path.exists(out)
     assert abs(_probe_dur(out) - 7.0) < 0.3
+    # after reconcile the ledger IS the realized timeline: the OUTPUT duration
+    # must match the reconciled meta.vtot_out tightly (this is the sync contract).
+    recon = ledger.load(str(tmp_path / "ledger.json"))
+    assert abs(_probe_dur(out) - recon["meta"]["vtot_out"]) < 0.1
