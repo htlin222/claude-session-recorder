@@ -60,6 +60,13 @@ def render(spec, demo, width, height, font_size, word_delay,
     a('Env VHS_DEMO "1"')
     a(f'Env CLAUDE_CONFIG_DIR "{cfg}"')
     a(f'Env VHS_TIMELINE "{timeline}"')
+    # isolate the SHELL too: point ZDOTDIR at the sandbox's clean .zshrc so the
+    # user's powerlevel10k (or any heavy prompt) never loads. In VHS's non-TTY
+    # PTY p10k's instant-prompt dumps its raw `${_p9k_…}` config as full-screen
+    # text at boot AND at Ctrl+C exit — which both (a) uglify the opening/closing
+    # frames and (b) read as two extra full-bright "prompt submissions" that
+    # break detect_turns. A minimal prompt keeps the frame clean and detection honest.
+    a(f'Env ZDOTDIR "{os.path.join(cfg, "zdotdir")}"')
     a("")
     a(f"Sleep {PRELUDE:.0f}s                   # let the shell prompt settle")
     # LAUNCH typed token-by-token: `claude`, then each flag (leading space),

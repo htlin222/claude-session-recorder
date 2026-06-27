@@ -25,3 +25,12 @@ def test_capture_plan_lists_launch_tokens(tmp_path):
     _tape, plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
                            font_size=26, word_delay=220)
     assert plan["launch"]["tokens"] == ["claude", "--model opus"]
+
+
+def test_tape_isolates_the_shell_via_zdotdir(tmp_path):
+    # regression: VHS's zsh must use the sandbox's clean ZDOTDIR so the user's
+    # powerlevel10k never dumps its `${_p9k_…}` config as full-screen text
+    # (which uglified the frame and broke detect_turns with false submissions).
+    tape, _plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                           font_size=26, word_delay=220)
+    assert 'Env ZDOTDIR' in tape and 'zdotdir' in tape

@@ -27,6 +27,19 @@ MODEL="${SANDBOX_MODEL:-opus}"
 
 mkdir -p "$DEMO/.cfg" "$DEMO/.claude"
 
+# --- isolated SHELL: a clean ZDOTDIR so VHS's zsh skips the user's ~/.zshrc /
+#     powerlevel10k. In VHS's non-TTY PTY p10k's instant-prompt dumps its raw
+#     `${_p9k_…}` config as full-screen text at boot AND on exit — ugly frames
+#     AND two false "prompt submissions" that break detect_turns. A minimal
+#     prompt (the tape sets Env ZDOTDIR to this dir) keeps the capture clean.
+mkdir -p "$DEMO/.cfg/zdotdir"
+cat > "$DEMO/.cfg/zdotdir/.zshrc" <<'ZRC'
+# minimal sandbox prompt — no p10k, no plugins, no instant-prompt dump
+POWERLEVEL9K_INSTANT_PROMPT=off
+PROMPT='%F{cyan}❯%f '
+setopt no_beep
+ZRC
+
 # --- auth: on this machine it's a FILE (not keychain) -> copy it in to skip login
 if [ -f "$GLOBAL_CFG/.credentials.json" ]; then
   command cp "$GLOBAL_CFG/.credentials.json" "$DEMO/.cfg/.credentials.json"
