@@ -1,17 +1,14 @@
 import detect_anchors as da
 
 
-def test_raw_segments_alternate_soft_hard_and_cover_video():
-    # boot ends at 2.0; two turns; video total 20.0
+def test_raw_segments_boot_then_alternating_soft_hard():
     turns = [{"typing_start": 4.0, "submit": 6.0, "done": 9.0},
              {"typing_start": 12.0, "submit": 13.0, "done": 17.0}]
     segs = da.raw_segments(ready=2.0, turns=turns, vtot=20.0)
-    kinds = [s["kind"] for s in segs]
-    # boot(soft) | type+gap(hard) | settle(soft) | type+gap(hard) | tail(soft)
-    assert kinds == ["soft", "hard", "soft", "hard", "soft"]
-    # contiguous + covers [0, vtot]
+    assert [s["kind"] for s in segs] == ["boot", "soft", "hard", "soft", "hard", "soft"]
+    assert segs[0]["raw"] == [0.0, 2.0]                       # boot = [0, ready]
     assert segs[0]["raw"][0] == 0.0 and segs[-1]["raw"][1] == 20.0
-    for a, b in zip(segs, segs[1:]):
+    for a, b in zip(segs, segs[1:]):                          # contiguous
         assert a["raw"][1] == b["raw"][0]
 
 

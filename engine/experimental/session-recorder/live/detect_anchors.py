@@ -109,26 +109,15 @@ def detect_turns(full, inp, n, turns, pre_enter):
 
 
 def raw_segments(ready, turns, vtot):
-    """Partition raw-video time into STRICTLY ALTERNATING SOFT (static,
-    stretchable) and HARD (typing->submit->done, kept verbatim) segments that
-    cover [0, vtot] contiguously. The SOFT segments are exactly the gaps between
-    HARD segments (plus the lead-in before the first prompt and the tail after
-    the last):
-
-      [0 .. typing_start_0]        soft  (boot/settle before the first prompt;
-                                          carries `ready`, the TUI-ready instant)
-      [typing_start_i .. done_i]   hard  (turn i — the uncontrollable axis)
-      [done_i .. typing_start_i+1] soft  (post-response settle)
-      [done_last .. vtot]          soft  (tail)
-    """
-    segs, cursor = [], 0.0
+    """Partition raw-video time. The launch/boot [0,ready] is kept VERBATIM
+    (real startup animation, never frozen). Idle regions (post-boot before the
+    first prompt, post-response settle, tail) are SOFT (freeze-stretchable). The
+    typing->submit->done windows are HARD (verbatim)."""
+    segs = [{"kind": "boot", "raw": [0.0, ready], "role": "boot"}]
+    cursor = ready
     for i, t in enumerate(turns):
-        soft = {"kind": "soft", "raw": [cursor, t["typing_start"]]}
-        if i == 0:
-            soft["role"], soft["ready"] = "boot", ready
-        else:
-            soft["role"], soft["turn_idx"] = "pre", i
-        segs.append(soft)
+        segs.append({"kind": "soft", "raw": [cursor, t["typing_start"]],
+                     "role": "pre", "turn_idx": i})
         segs.append({"kind": "hard", "raw": [t["typing_start"], t["done"]],
                      "turn_idx": i, "submit": t["submit"]})
         cursor = t["done"]
