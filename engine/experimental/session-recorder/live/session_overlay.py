@@ -119,7 +119,8 @@ def signals(video):
     rng = (f.max(axis=0) - f.min(axis=0)).mean(axis=1)          # per-row dynamic range
     lo, hi = int(0.80 * sh), int(0.95 * sh)
     peak = lo + int(np.argmax(rng[lo:hi]))
-    r0, r1 = max(0, peak - int(0.03 * sh)), min(sh, peak + int(0.035 * sh))
+    hw = int(0.016 * sh)                                         # TIGHT: just the input box,
+    r0, r1 = max(0, peak - hw), min(sh, peak + hw + 1)           # else response content leaks in
     band = f[:, r0:r1, :]
     base = band.min(axis=0, keepdims=True)            # per-pixel idle baseline
     inp = ((band - base) > 45).sum(axis=(1, 2)).astype(float)   # NEW bright pixels
@@ -134,49 +135,48 @@ def detect_ready(full):
     return 0.0
 
 
-def detect_turns(full, inp, n):
+def detect_turns(full, inp, n, turns, pre_enter):
     """Detect each turn's (typing_start, submit, done) FROM THE VIDEO — the only
     reliable ground truth (VHS video time drifts from the hook wall-clock by many
     seconds during heavy output, so the timeline can't be mapped to video time).
 
-    A prompt typing is a span where the input band spikes high then FALLS BACK
-    (the prompt is submitted) within a few seconds; the trailing idle state also
-    sits moderately high but never falls, so the duration cap rejects it. `done`
-    (claude finished) is the last big jump in full-screen content after submit —
-    after that the screen stops changing."""
+    The discriminator for a SUBMIT is a sharp PEAK: typing fills the input box to
+    near its maximum brightness, then Enter clears it. Lingering response content
+    in the band sits only MODERATELY bright and never peaks; the welcome flicker
+    and the idle state peak low too. So the contiguous runs where the band exceeds
+    HALF its global max are exactly the N prompt submissions — this separates a
+    turn's typing from the previous turn's response output, which a simpler
+    above-threshold span would merge. typing_start is derived from the tape's
+    known typing duration; `done` is the last big jump in full-screen content
+    before the next turn."""
     fmax = float(inp.max()) or 1.0
-    HI, LO = fmax * 0.30, fmax * 0.12
-    spans, i, N = [], 0, len(inp)
+    above = inp > 0.5 * fmax
+    groups, i, N = [], 0, len(inp)
     while i < N:
-        if inp[i] > HI:
+        if above[i]:
             j = i
-            while j < N and inp[j] > LO:
-                j += 1
-            d = (j - i) / FPS
-            peak = float(inp[i:j].max())
-            # a REAL prompt typing fully lights the input box briefly then clears:
-            # peak >= half the global max (rejects the welcome-screen placeholder
-            # flicker and the trailing idle state, both of which peak lower) and
-            # 0.5s <= duration < 8s (rejects blips and the sustained end state).
-            if 0.5 <= d < 8.0 and peak >= 0.5 * fmax:
-                spans.append((round(i / FPS, 3), round(j / FPS, 3)))
+            while j < N and (above[j] or (j + 6 < N and above[j:j + 6].any())):
+                j += 1                                   # tolerate <=0.5s dips
+            groups.append((i, j))
             i = j
         else:
             i += 1
-    if len(spans) != n:
-        raise SystemExit(f"detected {len(spans)} prompt typings, expected {n}. "
+    if len(groups) != n:
+        raise SystemExit(f"detected {len(groups)} prompt submissions, expected {n}. "
                          f"Tune the input band / thresholds, or the recording differs.")
     cmax = float(full.max()) or 1.0
     out = []
-    for k, (ts, sub) in enumerate(spans):
-        end = spans[k + 1][0] if k + 1 < len(spans) else N / FPS
-        a, b = int(sub * FPS), int(end * FPS)
-        last = a
-        for m in range(a + 1, min(b, N)):
-            if full[m] - full[m - 1] > 0.04 * cmax:     # content still growing
+    for k, (a, b) in enumerate(groups):
+        submit = round(b / FPS, 3)                       # box fullest -> Enter clears
+        typing_start = round(max(0.0, submit - turns[k].get("type_dur", 1.0) - pre_enter), 3)
+        nxt = (groups[k + 1][0] / FPS) if k + 1 < len(groups) else N / FPS
+        last = b
+        for m in range(b + 1, min(int(nxt * FPS), N)):
+            if full[m] - full[m - 1] > 0.04 * cmax:      # content still growing
                 last = m
-        done = round(min(end - 0.3, last / FPS + 0.5), 3)
-        out.append({"typing_start": ts, "submit": sub, "done": done})
+        done = round(min(nxt - 0.3, last / FPS + 0.5), 3)
+        out.append({"typing_start": typing_start, "submit": submit,
+                    "done": max(round(submit + 0.3, 3), done)})
     return out
 
 
@@ -195,7 +195,7 @@ def main():
 
     full, inp = signals(video)
     ready = detect_ready(full)
-    det = detect_turns(full, inp, n)        # per turn: typing_start, submit, done
+    det = detect_turns(full, inp, n, turns, plan.get("pre_enter", 0.4))
 
     op = plan.get("open", {})
     cl = plan.get("close", {"dur": 0.0, "text": "", "mp3": ""})
@@ -232,6 +232,22 @@ def main():
             sync["open_outro_dropped"] = False
         else:
             sync["open_outro_dropped"] = True   # no room before turn 1 — omit it
+    # if the LAST launch clip (a flag beat or the outro) still ends within a breath
+    # of turn-1's intro (fast boot + verbose launch), content-trim it so it ends
+    # MIN_GAP earlier. The flag is still TYPED at its original time (the panel and
+    # voice-leads are unaffected — only this clip's tail shrinks).
+    first_intro = det[0]["typing_start"] - turns[0]["intro"]["dur"] - INTRO_GAP
+    opens = [idx for idx, s in enumerate(segs) if s[0].startswith("open")]
+    if opens:
+        li = opens[-1]
+        lab, txt, on, d, mp3, _a = segs[li]
+        if on + d > first_intro - MIN_GAP:
+            obud = first_intro - MIN_GAP - on
+            if obud >= 0.8:
+                ntext, nmp3, nd, _ = fit_think(txt, mp3, obud, demo, lab)
+                segs[li] = (lab, ntext, on, nd, nmp3, 1.0)
+            else:
+                segs.pop(li)                       # no room at all — drop it
     sync["open_beats"] = [{"onset": s[2], "dur": s[3], "text": s[1]}
                           for s in segs if s[0].startswith("open")]
 
@@ -262,10 +278,21 @@ def main():
                 segs.append(("think", th_text, submit, th_dur, th_mp3, 1.0))
             else:
                 th_drop = True                 # too fast — no room even trimmed
-        # outro: over the finished response, at the detected `done`
+        # outro: over the finished response, at `done`. Fit-or-drop against the
+        # NEXT turn's intro (which is anchored to its typing) so the outro never
+        # crowds it — a long conclusion on a turn whose response finished close to
+        # the next prompt gets shortened, or dropped if there's no room.
         if tn["outro"]["dur"]:
-            segs.append(("outro", tn["outro"]["text"], done, tn["outro"]["dur"],
-                         os.path.join(demo, tn["outro"]["mp3"]), 1.0))
+            if i + 1 < len(turns):
+                nxt_intro = det[i + 1]["typing_start"] - turns[i + 1]["intro"]["dur"] - INTRO_GAP
+            else:
+                nxt_intro = vtot                       # last turn: close handles spacing
+            obudget = nxt_intro - MIN_GAP - done
+            otext, omp3, odur = tn["outro"]["text"], os.path.join(demo, tn["outro"]["mp3"]), tn["outro"]["dur"]
+            if odur > obudget:
+                otext, omp3, odur, _ = fit_think(otext, omp3, max(0.5, obudget), demo, f"outro{tn['index']}")
+            if odur <= obudget + 0.1:
+                segs.append(("outro", otext, done, odur, omp3, 1.0))
         sync["turns"].append({
             "index": tn["index"], "typing_start": typing_start, "submit": submit,
             "done": done, "intro_onset": intro_onset, "real_gap": round(gap, 3),

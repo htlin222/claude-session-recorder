@@ -61,17 +61,18 @@ programmatic invariants AND extracts a labelled filmstrip from the composite so
 you can eyeball "left terminal == right panel == the narrated moment" at each
 detected anchor. Run it on every recording.
 
-## Known limitation: detection on response-heavy multi-turn sessions
-Anchors are detected from the input-line band (the bottom variance peak, auto-
-located). This is robust for **text-reply turns** (Q&A, explanations) and a
-**single tool-using turn**. It is NOT yet robust when a session has **several
-turns that each write/edit files**: the response content reaches the input band
-and a turn's prompt typing merges into the previous turn's response span (and long
-think gaps add idle stretches), so `detect_turns` can miss a turn and abort with
-`detected N prompt typings, expected M`. Workarounds for now: keep file-writing to
-one turn, or split a big task into separate single-turn recordings. A proper fix
-needs a different turn-boundary signal (e.g. detect the N response bursts in the
-full-frame content and pair them with the timeline's N prompts) — tracked as TODO.
+## How detection survives response-heavy multi-turn sessions
+Naively thresholding the input band breaks when a session has several file-writing
+turns: response output lingers in the band and a turn's typing merges with the
+previous turn's response, so a turn gets missed. The fix (stress-tested on a
+3-turn file-writing session): a SUBMIT is a sharp PEAK — typing fills the input
+box to near its global max, then Enter clears it; lingering response content only
+sits MODERATELY bright. So `detect_turns` takes the contiguous runs where the
+(tight, auto-located) band exceeds HALF its max — exactly the N submissions —
+and derives `typing_start` from the tape's known typing duration. `done` is the
+last full-frame content jump before the next submit (absorbs long think gaps).
+Validated across text-Q&A, single-tool, and 3-turn file-writing recordings; run
+`validate_sync.py` on anything new.
 
 ## The opening is a CLI lesson
 The `launch` block treats starting `claude` like the repo's rsync/jq lessons:
