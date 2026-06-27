@@ -28,7 +28,8 @@ def main():
     neg = [t for t in turns if t["intro_onset"] < 0] + (
         [{"index": "open"}] if s.get("open_onset", 0) < 0 else [])
 
-    trimmed = [t for t in turns if t.get("think_trimmed")]
+    trimmed = [t for t in turns if t.get("think_trimmed") and not t.get("think_dropped")]
+    dropped = [t for t in turns if t.get("think_dropped")]
     print(f"session sync: {len(turns)} turns, video {s['video_total']}s, claude-ready {s['ready']}s")
     for t in turns:
         flag = "" if (t["voice_leads_typing"] and t["think_fits_gap"]) else "  <-- "
@@ -64,8 +65,13 @@ def main():
                   f"(BEAT_GAP/THINK_GUARD/close) and re-run.")
         raise SystemExit(1)
     msg = "PASS: voice leads every prompt; think fits every gap; all clips breathe"
+    notes = []
     if trimmed:
-        msg += f" ({len(trimmed)} think auto-shortened: turns {[t['index'] for t in trimmed]})"
+        notes.append(f"{len(trimmed)} think auto-shortened: turns {[t['index'] for t in trimmed]}")
+    if dropped:
+        notes.append(f"{len(dropped)} think dropped (turn too fast): turns {[t['index'] for t in dropped]}")
+    if notes:
+        msg += " (" + "; ".join(notes) + ")"
     print(f"\n{msg}.")
 
 

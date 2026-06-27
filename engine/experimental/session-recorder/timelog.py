@@ -14,7 +14,10 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOG = os.path.join(HERE, "session-timeline.jsonl")
+# $VHS_TIMELINE lets a live recording keep its OWN timeline (set by the tape, in
+# the demo dir) so recordings are self-contained and can run in parallel; default
+# is the shared file next to this script (the post-hoc single-session use).
+LOG = os.environ.get("VHS_TIMELINE") or os.path.join(HERE, "session-timeline.jsonl")
 
 
 def detail(d):

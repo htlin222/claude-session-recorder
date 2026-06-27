@@ -152,15 +152,20 @@ def detect_turns(full, inp, n):
             j = i
             while j < N and inp[j] > LO:
                 j += 1
-            if (j - i) / FPS < 8.0:                     # a real typing is brief
+            d = (j - i) / FPS
+            peak = float(inp[i:j].max())
+            # a REAL prompt typing fully lights the input box briefly then clears:
+            # peak >= half the global max (rejects the welcome-screen placeholder
+            # flicker and the trailing idle state, both of which peak lower) and
+            # 0.5s <= duration < 8s (rejects blips and the sustained end state).
+            if 0.5 <= d < 8.0 and peak >= 0.5 * fmax:
                 spans.append((round(i / FPS, 3), round(j / FPS, 3)))
             i = j
         else:
             i += 1
-    if len(spans) < n:
+    if len(spans) != n:
         raise SystemExit(f"detected {len(spans)} prompt typings, expected {n}. "
                          f"Tune the input band / thresholds, or the recording differs.")
-    spans = spans[:n]
     cmax = float(full.max()) or 1.0
     out = []
     for k, (ts, sub) in enumerate(spans):
@@ -243,14 +248,20 @@ def main():
             segs.append(("intro", tn["intro"]["text"], intro_onset,
                          tn["intro"]["dur"], os.path.join(demo, tn["intro"]["mp3"]), 1.0))
         # think: rides the response window [submit, done]; shorten the CONTENT to
-        # fit (natural speech, never time-compress).
-        th_text, th_dur, th_trim = tn["think"]["text"], tn["think"]["dur"], False
+        # fit (natural speech, never time-compress). If it STILL overruns (claude
+        # answered too fast for even the first clause), DROP it — a missing think
+        # is better than one bleeding into the outro; the window is tiny anyway.
+        th_text, th_dur, th_trim, th_drop = tn["think"]["text"], tn["think"]["dur"], False, False
         gap = max(0.5, done - submit)
+        budget = max(0.5, gap - THINK_GUARD)
         if th_dur:
             th_text, th_mp3, th_dur, th_trim = fit_think(
                 tn["think"]["text"], os.path.join(demo, tn["think"]["mp3"]),
-                max(0.5, gap - THINK_GUARD), demo, tn["index"])
-            segs.append(("think", th_text, submit, th_dur, th_mp3, 1.0))
+                budget, demo, tn["index"])
+            if th_dur <= budget + 0.1:
+                segs.append(("think", th_text, submit, th_dur, th_mp3, 1.0))
+            else:
+                th_drop = True                 # too fast — no room even trimmed
         # outro: over the finished response, at the detected `done`
         if tn["outro"]["dur"]:
             segs.append(("outro", tn["outro"]["text"], done, tn["outro"]["dur"],
@@ -259,9 +270,10 @@ def main():
             "index": tn["index"], "typing_start": typing_start, "submit": submit,
             "done": done, "intro_onset": intro_onset, "real_gap": round(gap, 3),
             "think_dur": round(th_dur, 3), "think_trimmed": th_trim,
-            "think_text": th_text,
+            "think_dropped": th_drop, "think_text": "" if th_drop else th_text,
             "voice_leads_typing": round(intro_onset + tn["intro"]["dur"], 3) <= typing_start,
-            "think_fits_gap": round(th_dur, 3) <= round(gap - THINK_GUARD + 0.05, 3),
+            # satisfied if the think fits OR was dropped (either way it won't bleed)
+            "think_fits_gap": th_drop or round(th_dur, 3) <= round(budget + 0.1, 3),
         })
 
     # close: over the ending, AFTER the last placed voice finishes (+ a full

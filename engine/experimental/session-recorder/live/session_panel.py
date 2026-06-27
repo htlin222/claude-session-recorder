@@ -20,6 +20,7 @@ the narration track; we reuse its audio). Render the terminal at 1200x1080
 
 Out: <demo>/session_panel.mp4  (1920x1080, terminal + panel + narration).
 """
+
 import argparse
 import json
 import os
@@ -29,7 +30,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 FF = "/opt/homebrew/bin/ffmpeg"
 CW, H, TERM_W = 1920, 1080, 1200
-PANEL_W = CW - TERM_W                       # 720
+PANEL_W = CW - TERM_W  # 720
 # one font for the whole panel (Hiragino renders both Latin and CJK) — keeps the
 # panel visually unified; the real terminal on the left stays monospaced.
 CJK = "/System/Library/Fonts/Hiragino Sans GB.ttc"
@@ -38,8 +39,13 @@ BG = (24, 24, 37)
 TEXT = (205, 214, 244)
 MUTED = (127, 132, 156)
 HL = (49, 50, 68)
-ROLE = {"ord": (166, 227, 161), "star": (250, 179, 135), "path": (203, 166, 247),
-        "blue": (137, 180, 250), "yellow": (249, 226, 175)}
+ROLE = {
+    "ord": (166, 227, 161),
+    "star": (250, 179, 135),
+    "path": (203, 166, 247),
+    "blue": (137, 180, 250),
+    "yellow": (249, 226, 175),
+}
 PAD = 42
 
 
@@ -50,7 +56,7 @@ def F(path, sz):
 def _new():
     img = Image.new("RGB", (PANEL_W, H), BG)
     d = ImageDraw.Draw(img)
-    d.line([(0, 0), (0, H)], fill=ROLE["path"], width=3)     # left divider
+    d.line([(0, 0), (0, H)], fill=ROLE["path"], width=3)  # left divider
     return img, d
 
 
@@ -77,10 +83,11 @@ def launch_panel(command, flags, revealed):
     for i, f in enumerate(flags[:revealed]):
         col, seg = colours[i % len(colours)], f["arg"]
         if x + d.textlength(seg, font=fa) > rmax:
-            y += 38; x = PAD + 24
+            y += 38
+            x = PAD + 24
         d.text((x, y + 1), seg, font=fa, fill=col)
         w = d.textlength(seg, font=fa)
-        d.line([(x, y + 30), (x + w, y + 30)], fill=col, width=3)   # short stub
+        d.line([(x, y + 30), (x + w, y + 30)], fill=col, width=3)  # short stub
         x += w + d.textlength("  ", font=fa)
     # annotations: a colour-barred box per revealed flag, height fits the note
     ay = y + 76
@@ -99,9 +106,16 @@ def launch_panel(command, flags, revealed):
 
 
 # shape per tool (drawn with PIL — unicode glyphs render as tofu in these fonts)
-TOOL = {"Write": ("sq", "建立檔案"), "Edit": ("sq", "修改檔案"), "Read": ("ring", "讀取"),
-        "Bash": ("dot", "執行指令"), "Grep": ("ring", "搜尋"), "Glob": ("ring", "找檔案"),
-        "Task": ("dia", "子代理"), "TodoWrite": ("sq", "更新待辦")}
+TOOL = {
+    "Write": ("sq", "建立檔案"),
+    "Edit": ("sq", "修改檔案"),
+    "Read": ("ring", "讀取"),
+    "Bash": ("dot", "執行指令"),
+    "Grep": ("ring", "搜尋"),
+    "Glob": ("ring", "找檔案"),
+    "Task": ("dia", "子代理"),
+    "TodoWrite": ("sq", "更新待辦"),
+}
 
 
 def draw_icon(d, x, y, shape, col, sz=20):
@@ -112,10 +126,10 @@ def draw_icon(d, x, y, shape, col, sz=20):
     elif shape == "dia":
         h = sz / 2
         d.polygon([(x + h, y), (x + sz, y + h), (x + h, y + sz), (x, y + h)], fill=col)
-    elif shape == "check":                       # a tick: two strokes
+    elif shape == "check":  # a tick: two strokes
         d.line([(x + 2, y + sz * 0.55), (x + sz * 0.4, y + sz - 2)], fill=col, width=4)
         d.line([(x + sz * 0.4, y + sz - 2), (x + sz, y + 1)], fill=col, width=4)
-    else:                                        # dot
+    else:  # dot
         d.ellipse([x, y, x + sz, y + sz], fill=col)
 
 
@@ -123,10 +137,10 @@ def turn_panel(num, total, prompt, events, revealed, conclusion=None):
     """A turn's action list: rows appear as claude performs each tool call."""
     img, d = _new()
     short = prompt if len(prompt) < 26 else prompt[:25] + "…"
-    _title(d, f"第 {num} / {total} 輪", short)        # title y44, divider y92, sub y100
+    _title(d, f"第 {num} / {total} 輪", short)  # title y44, divider y92, sub y100
     d.text((PAD, 148), "Claude 的動作", font=F(CJK, 21), fill=MUTED)
     y = 188
-    if not events:                       # a pure-text turn (no tool calls)
+    if not events:  # a pure-text turn (no tool calls)
         d.text((PAD, y), "·", font=F(MONO, 24), fill=MUTED)
         d.text((PAD + 40, y + 2), "Claude 直接以文字回覆", font=F(CJK, 20), fill=MUTED)
     for ev in events[:revealed]:
@@ -143,7 +157,9 @@ def turn_panel(num, total, prompt, events, revealed, conclusion=None):
         cy = H - 240
         d.line([(PAD, cy), (PANEL_W - PAD, cy)], fill=(52, 54, 66), width=2)
         d.text((PAD, cy + 16), "完成", font=F(CJK, 22), fill=ROLE["ord"])
-        for li, ln in enumerate(_wrap(d, conclusion, F(CJK, 20), PANEL_W - 2 * PAD)[:5]):
+        for li, ln in enumerate(
+            _wrap(d, conclusion, F(CJK, 20), PANEL_W - 2 * PAD)[:5]
+        ):
             d.text((PAD, cy + 52 + li * 30), ln, font=F(CJK, 20), fill=TEXT)
     return img
 
@@ -152,7 +168,8 @@ def _wrap(d, text, font, maxw):
     out, cur = [], ""
     for ch in text:
         if d.textlength(cur + ch, font=font) > maxw and cur:
-            out.append(cur); cur = ch
+            out.append(cur)
+            cur = ch
         else:
             cur += ch
     if cur:
@@ -163,28 +180,36 @@ def _wrap(d, text, font, maxw):
 def last_session(timeline):
     rows = [json.loads(l) for l in open(timeline, encoding="utf-8") if l.strip()]
     starts = [i for i, r in enumerate(rows) if r["event"] == "SessionStart"]
-    return rows[starts[-1]:] if starts else rows
+    return rows[starts[-1] :] if starts else rows
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--demo", required=True)
     ap.add_argument("--timeline", default=None)
     args = ap.parse_args()
     demo = os.path.abspath(args.demo)
     here = os.path.dirname(os.path.abspath(__file__))
-    timeline = args.timeline or os.path.join(os.path.dirname(here), "session-timeline.jsonl")
+    timeline = args.timeline or (
+        os.path.join(demo, "session-timeline.jsonl")
+        if os.path.exists(os.path.join(demo, "session-timeline.jsonl"))
+        else os.path.join(os.path.dirname(here), "session-timeline.jsonl")
+    )
     plan = json.load(open(os.path.join(demo, "plan.json"), encoding="utf-8"))
     sync = json.load(open(os.path.join(demo, "session_sync.json"), encoding="utf-8"))
     rows = last_session(timeline)
     ups = [r for r in rows if r["event"] == "UserPromptSubmit"]
     stop = [r for r in rows if r["event"] == "Stop"]
-    flags = plan["open"]["flags"] if "flags" in plan.get("open", {}) else \
-        [{"arg": b["token"], "say": b["text"]} for b in plan["open"]["beats"][1:]]
+    flags = (
+        plan["open"]["flags"]
+        if "flags" in plan.get("open", {})
+        else [{"arg": b["token"], "say": b["text"]} for b in plan["open"]["beats"][1:]]
+    )
     cmd = plan["open"].get("command", "")
     turns = plan["turns"]
-    nfb = len(plan["open"]["beats"])              # beats incl base
+    nfb = len(plan["open"]["beats"])  # beats incl base
 
     # ---- panel keyframes: (video_time, PIL image) ----
     keys = []
@@ -206,17 +231,18 @@ def main():
         sub_v, done_v = st["submit"], st["done"]
         # header appears WITH the intro voice (early), not at submit
         keys.append((round(st["intro_onset"], 3), ("turn", ti, 0, False)))
-        evs = [r for r in rows if r["event"] == "PreToolUse"
-               and u["t"] < r["t"] <= s["t"]]
-        span_w = max(0.1, s["t"] - u["t"])                         # turn span (wall)
+        evs = [
+            r for r in rows if r["event"] == "PreToolUse" and u["t"] < r["t"] <= s["t"]
+        ]
+        span_w = max(0.1, s["t"] - u["t"])  # turn span (wall)
         seen = 0
         for ev in evs:
             seen += 1
             frac = min(1.0, max(0.0, (ev["t"] - u["t"]) / span_w))
-            ev_v = sub_v + frac * (done_v - sub_v)                 # -> video time
+            ev_v = sub_v + frac * (done_v - sub_v)  # -> video time
             evd = ev.get("detail", "")
             tool = evd.split(" ", 1)[0]
-            target = (evd.split(" ", 1)[1] if " " in evd else "")
+            target = evd.split(" ", 1)[1] if " " in evd else ""
             target = os.path.basename(target) if "/" in target else target[:36]
             keys.append((round(ev_v, 3), ("turn", ti, seen, False, (tool, target))))
         keys.append((round(done_v, 3), ("turn", ti, seen, True)))  # conclusion
@@ -234,12 +260,17 @@ def main():
             img = launch_panel(cmd, flags, spec[1])
         else:
             _, ti, nrev, concl = spec[:4]
-            if len(spec) == 5:                     # an event row to add
+            if len(spec) == 5:  # an event row to add
                 tool, target = spec[4]
                 turn_events[ti].append({"tool": tool, "target": target})
-            img = turn_panel(ti + 1, len(turns), turns[ti]["prompt"],
-                             turn_events[ti], nrev,
-                             conclusion_text(ti) if concl else None)
+            img = turn_panel(
+                ti + 1,
+                len(turns),
+                turns[ti]["prompt"],
+                turn_events[ti],
+                nrev,
+                conclusion_text(ti) if concl else None,
+            )
         p = os.path.join(pdir, f"p{idx:03d}.png")
         img.save(p)
         segs.append((p, t))
@@ -249,29 +280,76 @@ def main():
     lst = os.path.join(pdir, "panels.txt")
     with open(lst, "w") as f:
         # blank panel before the first keyframe
-        blank = os.path.join(pdir, "blank.png"); _new()[0].save(blank)
+        blank = os.path.join(pdir, "blank.png")
+        _new()[0].save(blank)
         f.write(f"file '{blank}'\nduration {segs[0][1]:.3f}\n")
         for i, (p, t) in enumerate(segs):
             end = segs[i + 1][1] if i + 1 < len(segs) else vtot
             f.write(f"file '{p}'\nduration {max(0.05, end - t):.3f}\n")
         f.write(f"file '{segs[-1][0]}'\n")
     panel_mp4 = os.path.join(pdir, "panel.mp4")
-    subprocess.run([FF, "-y", "-f", "concat", "-safe", "0", "-i", lst, "-r", "25",
-                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20",
-                    "-vsync", "cfr", panel_mp4], check=True, capture_output=True)
+    subprocess.run(
+        [
+            FF,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            lst,
+            "-r",
+            "25",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "20",
+            "-vsync",
+            "cfr",
+            panel_mp4,
+        ],
+        check=True,
+        capture_output=True,
+    )
 
     # composite: terminal (1200) left + panel (720) right; audio from session.mp4
     term = os.path.join(demo, "terminal.mp4")
     audio_src = os.path.join(demo, "session.mp4")
     out = os.path.join(demo, "session_panel.mp4")
     subprocess.run(
-        [FF, "-y", "-i", term, "-i", panel_mp4, "-i", audio_src,
-         "-filter_complex",
-         f"[0:v]scale={TERM_W}:-1,pad={TERM_W}:{H}:0:(oh-ih)/2:color=0x181825[L];"
-         f"[1:v]scale={PANEL_W}:{H}[R];[L][R]hstack=inputs=2[v]",
-         "-map", "[v]", "-map", "2:a", "-c:v", "libx264", "-pix_fmt", "yuv420p",
-         "-crf", "20", "-c:a", "aac", "-b:a", "192k", out],
-        check=True, capture_output=True)
+        [
+            FF,
+            "-y",
+            "-i",
+            term,
+            "-i",
+            panel_mp4,
+            "-i",
+            audio_src,
+            "-filter_complex",
+            f"[0:v]scale={TERM_W}:-1,pad={TERM_W}:{H}:0:(oh-ih)/2:color=0x181825[L];"
+            f"[1:v]scale={PANEL_W}:{H}[R];[L][R]hstack=inputs=2[v]",
+            "-map",
+            "[v]",
+            "-map",
+            "2:a",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "20",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            out,
+        ],
+        check=True,
+        capture_output=True,
+    )
     print(f"wrote {out}  ({len(segs)} panel keyframes)")
 
 

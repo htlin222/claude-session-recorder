@@ -52,9 +52,26 @@ python3 "$SR/live/verify_session.py" --demo "$DEMO"
 .venv/bin/python "$SR/live/session_panel.py" --demo "$DEMO"
 ```
 If step 5 reports a turn whose **think voice overruns** its real gap (claude
-answered too fast), shorten that turn's `think` line in the script and re-record
-(the outer loop). voice-leads-typing and overlaps are structural and should never
-fail; if they do it's a placement bug.
+answered too fast), the think is auto-dropped (a missing think beats a bleeding
+one); shorten that turn's `think` line if you want it kept. voice-leads-typing and
+overlaps are structural and should never fail; if they do it's a placement bug.
+
+`validate_sync.py --demo <demo>` is the stress-test harness: it re-checks the
+programmatic invariants AND extracts a labelled filmstrip from the composite so
+you can eyeball "left terminal == right panel == the narrated moment" at each
+detected anchor. Run it on every recording.
+
+## Known limitation: detection on response-heavy multi-turn sessions
+Anchors are detected from the input-line band (the bottom variance peak, auto-
+located). This is robust for **text-reply turns** (Q&A, explanations) and a
+**single tool-using turn**. It is NOT yet robust when a session has **several
+turns that each write/edit files**: the response content reaches the input band
+and a turn's prompt typing merges into the previous turn's response span (and long
+think gaps add idle stretches), so `detect_turns` can miss a turn and abort with
+`detected N prompt typings, expected M`. Workarounds for now: keep file-writing to
+one turn, or split a big task into separate single-turn recordings. A proper fix
+needs a different turn-boundary signal (e.g. detect the N response bursts in the
+full-frame content and pair them with the timeline's N prompts) — tracked as TODO.
 
 ## The opening is a CLI lesson
 The `launch` block treats starting `claude` like the repo's rsync/jq lessons:

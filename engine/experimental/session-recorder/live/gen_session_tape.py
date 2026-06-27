@@ -76,6 +76,7 @@ def emit(spec, demo, voice_dir, theme, font_size, width, height,
     a("")
     a('Env VHS_DEMO "1"')
     a(f'Env CLAUDE_CONFIG_DIR "{cfg}"')
+    a(f'Env VHS_TIMELINE "{os.path.join(os.path.abspath(demo), "session-timeline.jsonl")}"')
     a("")
     a(f"Sleep {PRELUDE:.0f}s                   # let the shell prompt settle")
     # LAUNCH as a CLI lesson (sync-model v5 hero-command pacing): type `claude`,
