@@ -4,21 +4,23 @@ the voice LEADS each prompt (never trails it), then mux it over terminal.mp4.
 
 Design: docs/plans/2026-06-27-claude-session-voiceover-sync-design.md.
 
-Anchors come from VISUAL DETECTION (the repo's detect_clears philosophy), not
-tape arithmetic — per-turn typing time, boot, and sentinel-render errors compound
-too much, and the hook wall-clock drifts from VHS video time (~2s/turn observed),
-so a single offset can't align. Instead we read the terminal's own pixels:
-  * claude-ready : first frame the TUI fills the screen.
-  * per turn     : the INPUT line lights up while the prompt is typed, then drops
-                   when it's submitted -> (typing_start_i, submit_i).
-The think gap's DURATION (offset-invariant) is taken from the timeline
-(Stop_i - UserPromptSubmit_i) to locate the response end.
+ALL timing comes from VISUAL DETECTION of the terminal video — the only ground
+truth (the repo's detect_clears philosophy). The hook wall-clock CANNOT be mapped
+to video time: VHS video time drifts from wall-clock by many seconds during heavy
+output (8.3s over one 70s session, measured), and the drift is non-uniform, so no
+single or per-turn offset aligns. We read the terminal's own pixels instead:
+  * claude-ready  : first frame the TUI fills the screen.
+  * per turn      : the input band spikes then FALLS while the prompt is typed
+                    -> (typing_start, submit); `done` (claude finished) is the
+                    last big jump in full-screen content after submit.
+The timeline is NOT used here (session_panel.py uses it only to label the tool
+events, mapped into each detected [submit, done] window by wall-clock fraction).
 
 Voice placement (video time, from detected anchors):
-  open     -> just after claude-ready, ending before turn-1's intro
+  open     -> deterministic launch beats (prelude-paced), each leads its flag
   intro_i  -> ends exactly at typing_start_i      (=> voice-leads-typing)
-  think_i  -> submit_i (rides the gap; atempo-compressed if it would overrun)
-  outro_i  -> submit_i + real_gap_i (over the finished response)
+  think_i  -> submit_i (rides [submit, done]; content-shortened if it overruns)
+  outro_i  -> done_i (over the finished response)
   close    -> after the last response, over the ending
 
 Outputs (in --demo): session.mp4, session.srt, session_sync.json. The video is
@@ -97,17 +99,26 @@ def srt_ts(s):
 
 
 def signals(video):
-    """(full, input) bright-pixel signals per frame: full screen and the bottom
-    input-line band. Typing lights the input band; submitting clears it."""
-    sw, sh = 240, 135
+    """(full, input) signals per frame. `input` measures NEW brightness in the
+    bottom band relative to each pixel's own baseline (its min over time), so a
+    constant status line contributes nothing while the input box (dark when idle,
+    bright while typing) stands out. This makes detection robust across terminal
+    heights — the status line's fraction of the frame changes with height but its
+    constant brightness is always cancelled."""
+    sw, sh = 240, 180
     raw = subprocess.run([FF, "-i", video, "-vf",
                           f"scale={sw}:{sh},format=gray,fps={FPS}",
                           "-f", "rawvideo", "-"], capture_output=True).stdout
     n = len(raw) // (sw * sh)
-    f = np.frombuffer(raw, np.uint8)[:n * sw * sh].reshape(n, sh, sw)
-    r0, r1 = int(0.82 * sh), int(0.93 * sh)
+    f = np.frombuffer(raw, np.uint8)[:n * sw * sh].reshape(n, sh, sw).astype(np.int16)
     full = (f > 90).sum(axis=(1, 2)).astype(float)
-    inp = (f[:, r0:r1, :] > 90).sum(axis=(1, 2)).astype(float)
+    # tight band on JUST the input line (above the status line), baseline-subtracted
+    # so the constant status line cancels and only typed text lights it up. Response
+    # output renders higher, so it stays out of this band.
+    r0, r1 = int(0.84 * sh), int(0.905 * sh)
+    band = f[:, r0:r1, :]
+    base = band.min(axis=0, keepdims=True)            # per-pixel idle baseline
+    inp = ((band - base) > 45).sum(axis=(1, 2)).astype(float)   # NEW bright pixels
     return full, inp
 
 
@@ -119,77 +130,69 @@ def detect_ready(full):
     return 0.0
 
 
-def detect_typing(inp):
-    """Return [(typing_start, submit)] for every contiguous span where the input
-    band sits well above its idle (cursor-blink) level. Includes the launch
-    command typed in the shell before claude boots — the caller splits on
-    claude-ready (launch spans come before it, prompt spans after)."""
-    idle = float(np.median(inp[inp > 0]))
-    thr = idle + 30
-    hot = inp > thr
-    regs, i, N = [], 0, len(inp)
+def detect_turns(full, inp, n):
+    """Detect each turn's (typing_start, submit, done) FROM THE VIDEO — the only
+    reliable ground truth (VHS video time drifts from the hook wall-clock by many
+    seconds during heavy output, so the timeline can't be mapped to video time).
+
+    A prompt typing is a span where the input band spikes high then FALLS BACK
+    (the prompt is submitted) within a few seconds; the trailing idle state also
+    sits moderately high but never falls, so the duration cap rejects it. `done`
+    (claude finished) is the last big jump in full-screen content after submit —
+    after that the screen stops changing."""
+    fmax = float(inp.max()) or 1.0
+    HI, LO = fmax * 0.30, fmax * 0.12
+    spans, i, N = [], 0, len(inp)
     while i < N:
-        if hot[i]:
+        if inp[i] > HI:
             j = i
-            while j < N and (hot[j] or (j + 3 < N and hot[j:j + 3].any())):
+            while j < N and inp[j] > LO:
                 j += 1
-            regs.append((round(i / FPS, 3), round(j / FPS, 3)))
+            if (j - i) / FPS < 8.0:                     # a real typing is brief
+                spans.append((round(i / FPS, 3), round(j / FPS, 3)))
             i = j
         else:
             i += 1
-    return regs
-
-
-def load_gaps(timeline, n):
-    """real_gap_i = Stop_i - UserPromptSubmit_i for n turns, from the LAST session
-    in the timeline (timelog.py APPENDS, so reset or take the most recent block)."""
-    rows = [json.loads(l) for l in open(timeline, encoding="utf-8") if l.strip()]
-    starts = [i for i, r in enumerate(rows) if r["event"] == "SessionStart"]
-    if starts:
-        rows = rows[starts[-1]:]
-    ups = [r["t"] for r in rows if r["event"] == "UserPromptSubmit"]
-    stop = [r["t"] for r in rows if r["event"] == "Stop"]
-    if len(ups) < n or len(stop) < n:
-        raise SystemExit(f"last session has {len(ups)} prompts / {len(stop)} stops, "
-                         f"need {n}. Stale/empty {timeline}? Reset it before recording.")
-    return [round(stop[i] - ups[i], 3) for i in range(n)]
+    if len(spans) < n:
+        raise SystemExit(f"detected {len(spans)} prompt typings, expected {n}. "
+                         f"Tune the input band / thresholds, or the recording differs.")
+    spans = spans[:n]
+    cmax = float(full.max()) or 1.0
+    out = []
+    for k, (ts, sub) in enumerate(spans):
+        end = spans[k + 1][0] if k + 1 < len(spans) else N / FPS
+        a, b = int(sub * FPS), int(end * FPS)
+        last = a
+        for m in range(a + 1, min(b, N)):
+            if full[m] - full[m - 1] > 0.04 * cmax:     # content still growing
+                last = m
+        done = round(min(end - 0.3, last / FPS + 0.5), 3)
+        out.append({"typing_start": ts, "submit": sub, "done": done})
+    return out
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--demo", required=True)
-    ap.add_argument("--timeline", default=None,
-                    help="session-timeline.jsonl (default: the repo session-recorder one)")
     ap.add_argument("--video", default="terminal.mp4")
     args = ap.parse_args()
     demo = os.path.abspath(args.demo)
-    here = os.path.dirname(os.path.abspath(__file__))
-    timeline = args.timeline or os.path.join(os.path.dirname(here), "session-timeline.jsonl")
     video = os.path.join(demo, args.video)
     plan = json.load(open(os.path.join(demo, "plan.json"), encoding="utf-8"))
     turns = plan["turns"]
     n = len(turns)
     vtot = dur(video)
-    gaps = load_gaps(timeline, n)
 
     full, inp = signals(video)
     ready = detect_ready(full)
-    all_regions = detect_typing(inp)
-    # the n PROMPT typings are the spans after claude-ready (the launch typing in
-    # the shell sits before it; we don't rely on detecting it — its position is
-    # deterministic: nothing variable precedes it in the tape).
-    regions = [r for r in all_regions if r[0] >= ready]
-    if len(regions) != n:
-        raise SystemExit(f"detected {len(regions)} prompt typings after ready, expected {n}. "
-                         f"Tune the input band / threshold, or the recording differs.")
+    det = detect_turns(full, inp, n)        # per turn: typing_start, submit, done
 
     op = plan.get("open", {})
     cl = plan.get("close", {"dur": 0.0, "text": "", "mp3": ""})
 
     segs = []        # (label, text, onset, dur, src_mp3, atempo)
-    sync = {"video_total": round(vtot, 3), "ready": ready, "gaps": gaps,
-            "regions": regions, "turns": []}
+    sync = {"video_total": round(vtot, 3), "ready": ready, "turns": []}
 
     # open: narrate the LAUNCH as separate per-flag beats (not one dense clip).
     # VOICE LEADS each token: the tape narrates a flag, THEN types it, so the
@@ -211,7 +214,7 @@ def main():
     # there's no room (the flags are already narrated; the outro is just flavor).
     outro = op.get("outro", {"dur": 0.0})
     if outro.get("dur"):
-        first_intro = regions[0][0] - turns[0]["intro"]["dur"] - INTRO_GAP
+        first_intro = det[0]["typing_start"] - turns[0]["intro"]["dur"] - INTRO_GAP
         budget = first_intro - MIN_GAP - cursor
         if budget >= 1.0:
             otext, omp3, odur, _ = fit_think(outro["text"], os.path.join(demo, outro["mp3"]),
@@ -225,35 +228,36 @@ def main():
 
     last_stop = ready
     for i, tn in enumerate(turns):
-        typing_start, submit = regions[i]
-        stop = round(submit + gaps[i], 3)
-        last_stop = stop
+        # all three anchors are DETECTED from the video (the only ground truth).
+        typing_start = det[i]["typing_start"]
+        submit = det[i]["submit"]
+        done = det[i]["done"]                  # claude finished (last content jump)
+        last_stop = done
         # intro: ends INTRO_GAP before typing starts
         intro_onset = round(typing_start - tn["intro"]["dur"] - INTRO_GAP, 3)
         if tn["intro"]["dur"]:
             segs.append(("intro", tn["intro"]["text"], intro_onset,
                          tn["intro"]["dur"], os.path.join(demo, tn["intro"]["mp3"]), 1.0))
-        # think: rides the real gap. If the authored line overruns, SHORTEN THE
-        # CONTENT to fit (natural speech) — never time-compress (that suddenly
-        # speeds the voice and sounds off against the normal-rate intro/outro).
+        # think: rides the response window [submit, done]; shorten the CONTENT to
+        # fit (natural speech, never time-compress).
         th_text, th_dur, th_trim = tn["think"]["text"], tn["think"]["dur"], False
+        gap = max(0.5, done - submit)
         if th_dur:
-            budget = max(0.5, gaps[i] - THINK_GUARD)
             th_text, th_mp3, th_dur, th_trim = fit_think(
                 tn["think"]["text"], os.path.join(demo, tn["think"]["mp3"]),
-                budget, demo, tn["index"])
+                max(0.5, gap - THINK_GUARD), demo, tn["index"])
             segs.append(("think", th_text, submit, th_dur, th_mp3, 1.0))
-        # outro: over the finished response
+        # outro: over the finished response, at the detected `done`
         if tn["outro"]["dur"]:
-            segs.append(("outro", tn["outro"]["text"], stop, tn["outro"]["dur"],
+            segs.append(("outro", tn["outro"]["text"], done, tn["outro"]["dur"],
                          os.path.join(demo, tn["outro"]["mp3"]), 1.0))
         sync["turns"].append({
             "index": tn["index"], "typing_start": typing_start, "submit": submit,
-            "stop": stop, "intro_onset": intro_onset, "real_gap": gaps[i],
+            "done": done, "intro_onset": intro_onset, "real_gap": round(gap, 3),
             "think_dur": round(th_dur, 3), "think_trimmed": th_trim,
             "think_text": th_text,
             "voice_leads_typing": round(intro_onset + tn["intro"]["dur"], 3) <= typing_start,
-            "think_fits_gap": round(th_dur, 3) <= round(gaps[i] - THINK_GUARD + 0.05, 3),
+            "think_fits_gap": round(th_dur, 3) <= round(gap - THINK_GUARD + 0.05, 3),
         })
 
     # close: over the ending, AFTER the last placed voice finishes (+ a full
@@ -316,9 +320,8 @@ def main():
     for t in sync["turns"]:
         trim = "  [think trimmed to fit]" if t["think_trimmed"] else ""
         print(f"  turn {t['index']}: intro@{t['intro_onset']:.1f} type@{t['typing_start']:.1f} "
-              f"submit@{t['submit']:.1f} stop@{t['stop']:.1f} gap={t['real_gap']:.1f}{trim}")
-    if "open_onset" in sync:
-        print(f"  open@{sync['open_onset']:.1f}  close@{sync.get('close_onset','-')}")
+              f"submit@{t['submit']:.1f} done@{t['done']:.1f} win={t['real_gap']:.1f}{trim}")
+    print(f"  open beats: {len(sync.get('open_beats', []))}  close@{sync.get('close_onset','-')}")
 
 
 if __name__ == "__main__":
