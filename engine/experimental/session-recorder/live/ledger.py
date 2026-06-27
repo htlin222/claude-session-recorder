@@ -50,6 +50,20 @@ def beat_start(beat):
     return min(starts) if starts else 0.0
 
 
+def serialization_violations(beats, breath=BREATH):
+    """Return one record per adjacent pair that breaks
+    `beat[i].end + breath <= beat[i+1].start`. Dropped beats are excluded.
+    Active beats are ordered by their start time before checking."""
+    active = sorted((b for b in beats if not b.get("drop")), key=beat_start)
+    out = []
+    for i in range(1, len(active)):
+        gap = round(beat_start(active[i]) - beat_end(active[i - 1]), 3)
+        if gap < breath - 0.05:
+            out.append({"prev": active[i - 1].get("id"),
+                        "next": active[i].get("id"), "gap": gap})
+    return out
+
+
 def load(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
