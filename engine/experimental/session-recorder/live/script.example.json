@@ -3,11 +3,11 @@
   "launch": {
     "base": "claude",
     "flags": [
-      {"arg": "--model opus", "say": "加上 model opus 指定模型，"},
-      {"arg": "--permission-mode bypassPermissions", "say": "再用 permission mode bypass，讓示範自動執行、不問權限。"}
+      {"arg": "--model opus", "say": "用 model opus 指定模型。", "note": "指定使用 Opus 模型。"},
+      {"arg": "--permission-mode bypassPermissions", "say": "再用 permission mode bypass，讓示範自動執行、不逐次詢問權限。", "note": "略過權限詢問，示範時自動執行。"}
     ],
-    "intro": "我們用 claude 啟動，",
-    "outro": "稍候就進入互動畫面。"
+    "intro": "我們先用 claude 這個指令啟動。",
+    "outro": "稍候就進入它的互動畫面。"
   },
   "close": "這次示範就到這裡，Claude 從零寫出並驗證了一個完整的函式。",
   "turns": [

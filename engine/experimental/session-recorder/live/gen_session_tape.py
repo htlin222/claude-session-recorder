@@ -40,7 +40,7 @@ HOLD = 1.0              # silence after outro before quitting / next turn
 OPEN_LEAD = 0.6         # the open voice leads the launch-command typing by this much
 CLOSE_HOLD = 1.0        # silence after the close narration before quitting
 PRELUDE = 2.0           # Sleep before the launch typing (shell prompt settles)
-BEAT_GAP = 0.6          # silence between consecutive launch-flag narrations
+BEAT_GAP = 0.8          # silence between consecutive launch-flag narrations
 
 
 def synth(text, out_mp3):

@@ -91,9 +91,25 @@ def launch_panel(command, flags, revealed):
     return img
 
 
-TOOL = {"Write": ("✎", "建立檔案"), "Edit": ("✎", "修改檔案"), "Read": ("▢", "讀取"),
-        "Bash": ("⚙", "執行指令"), "Grep": ("⌕", "搜尋"), "Glob": ("⌕", "找檔案"),
-        "Task": ("⌗", "子代理"), "TodoWrite": ("☑", "更新待辦")}
+# shape per tool (drawn with PIL — unicode glyphs render as tofu in these fonts)
+TOOL = {"Write": ("sq", "建立檔案"), "Edit": ("sq", "修改檔案"), "Read": ("ring", "讀取"),
+        "Bash": ("dot", "執行指令"), "Grep": ("ring", "搜尋"), "Glob": ("ring", "找檔案"),
+        "Task": ("dia", "子代理"), "TodoWrite": ("sq", "更新待辦")}
+
+
+def draw_icon(d, x, y, shape, col, sz=20):
+    if shape == "sq":
+        d.rectangle([x, y, x + sz, y + sz], fill=col)
+    elif shape == "ring":
+        d.ellipse([x, y, x + sz, y + sz], outline=col, width=3)
+    elif shape == "dia":
+        h = sz / 2
+        d.polygon([(x + h, y), (x + sz, y + h), (x + h, y + sz), (x, y + h)], fill=col)
+    elif shape == "check":                       # a tick: two strokes
+        d.line([(x + 2, y + sz * 0.55), (x + sz * 0.4, y + sz - 2)], fill=col, width=4)
+        d.line([(x + sz * 0.4, y + sz - 2), (x + sz, y + 1)], fill=col, width=4)
+    else:                                        # dot
+        d.ellipse([x, y, x + sz, y + sz], fill=col)
 
 
 def turn_panel(num, total, prompt, events, revealed, conclusion=None):
@@ -107,9 +123,9 @@ def turn_panel(num, total, prompt, events, revealed, conclusion=None):
         d.text((PAD, y), "·", font=F(MONO, 24), fill=MUTED)
         d.text((PAD + 40, y + 2), "Claude 直接以文字回覆", font=F(CJK, 20), fill=MUTED)
     for ev in events[:revealed]:
-        icon, verb = TOOL.get(ev["tool"], ("•", ev["tool"]))
+        shape, verb = TOOL.get(ev["tool"], ("dot", ev["tool"]))
         col = ROLE["star"] if ev["tool"] in ("Bash",) else ROLE["ord"]
-        d.text((PAD, y), icon, font=F(CJK, 24), fill=col)
+        draw_icon(d, PAD, y + 4, shape, col)
         d.text((PAD + 40, y), ev["tool"], font=F(MONO, 21), fill=col)
         d.text((PAD + 40, y + 30), verb, font=F(CJK, 17), fill=MUTED)
         tgt = ev.get("target", "")
@@ -119,7 +135,8 @@ def turn_panel(num, total, prompt, events, revealed, conclusion=None):
     if conclusion:
         cy = H - 240
         d.line([(PAD, cy), (PANEL_W - PAD, cy)], fill=(52, 54, 66), width=2)
-        d.text((PAD, cy + 16), "✓ 完成", font=F(CJK, 22), fill=ROLE["ord"])
+        draw_icon(d, PAD, cy + 18, "check", ROLE["ord"], sz=22)
+        d.text((PAD + 36, cy + 16), "完成", font=F(CJK, 22), fill=ROLE["ord"])
         for li, ln in enumerate(_wrap(d, conclusion, F(CJK, 20), PANEL_W - 2 * PAD)[:5]):
             d.text((PAD, cy + 52 + li * 30), ln, font=F(CJK, 20), fill=TEXT)
     return img
@@ -167,14 +184,12 @@ def main():
     keys = []
     pdir = os.path.join(demo, "_panels")
     os.makedirs(pdir, exist_ok=True)
-    # launch: reveal a flag each time its token appears (beat onset + dur)
-    beats = sync["open_beats"]
-    for k in range(1, len(plan["open"]["beats"])):          # skip base (k=0)
-        b = plan["open"]["beats"][k]
-        onset = next((s["onset"] for s in beats if s["text"] == b["text"]), None)
-        if onset is None:
-            continue
-        keys.append((round(onset + b["dur"], 3), ("launch", k)))   # flag appears
+    # launch: reveal each flag WHEN ITS NARRATION STARTS (= the voice onset), so
+    # the panel and voice appear TOGETHER and early — not delayed to the terminal
+    # typing (which lags the voice). open_beats are [base, flag1, flag2, …] in
+    # order; beat k's onset reveals k flags (k=0 -> just "$ claude").
+    for k, ob in enumerate(sync["open_beats"]):
+        keys.append((round(ob["onset"], 3), ("launch", k)))
     # turns: header when the prompt is submitted; each tool event mapped into the
     # DETECTED [submit, done] window by its wall-clock FRACTION of the turn (the
     # window is from the video; the timeline only orders/labels the events, since
@@ -183,7 +198,8 @@ def main():
     for ti, (t, u, s) in enumerate(zip(turns, ups, stop)):
         st = sync["turns"][ti]
         sub_v, done_v = st["submit"], st["done"]
-        keys.append((round(sub_v, 3), ("turn", ti, 0, False)))     # header, no events
+        # header appears WITH the intro voice (early), not at submit
+        keys.append((round(st["intro_onset"], 3), ("turn", ti, 0, False)))
         evs = [r for r in rows if r["event"] == "PreToolUse"
                and u["t"] < r["t"] <= s["t"]]
         span_w = max(0.1, s["t"] - u["t"])                         # turn span (wall)
