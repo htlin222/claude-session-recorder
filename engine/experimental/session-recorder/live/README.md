@@ -1,45 +1,54 @@
 # live/ — film a real Claude Code session with VHS (Roadmap path #4)
 
-The parent `session-recorder/` does **post-hoc** narration: you run a session,
-the hooks log a timeline, `gen_voiceover.py` narrates it afterward. This folder
-adds the **live** half from the README Roadmap: actually *filming* the `claude`
-TUI with VHS, driving prompts and waiting on a turn-done **sentinel** so the
-recording knows exactly when each response finished — no guessed `Sleep`.
+The parent `session-recorder/` does **post-hoc** narration placed at raw event
+times — so the voice always *trails* the typing (sync-model v1's failure). This
+folder *films* the `claude` TUI with VHS and places a **voice-leads-typing**
+narration: you hear what each prompt will do BEFORE it's typed. Full rationale:
+`docs/plans/2026-06-27-claude-session-voiceover-sync-design.md`.
 
-It reuses the parent's `timelog.py` (timeline) and `gen_voiceover.py` (edge-tts
-zh-TW narration). The only new pieces are the **clean-recording recipe** and the
-**on-screen sentinel** — the two things that make a real `claude` run filmable.
+Key idea — **hard axis vs soft slots**. claude's think gap (Enter→sentinel) is
+non-controllable; the pre-prompt pause, typing, and post-output hold are ours. So
+the intro voice lives in the pre-prompt slot (leads typing, deterministic), the
+outro in the post-output hold, and only the *think* voice must fit the real gap
+(loop-until-align). Anchors are read from the video's own pixels (the input line
+lights up while typing, clears on submit) — not tape arithmetic, which drifts.
 
 ## Files
 | File | Role |
 | --- | --- |
-| `claude_sandbox.sh` | Stage an **isolated** Claude Code project: own `CLAUDE_CONFIG_DIR` (focus off, no dialogs, pinned model, credentials copied) + project `.claude/settings.json` wiring `timelog.py` **and** the sentinel. |
-| `vhs_stop_sentinel.sh` | Stop hook that prints the on-screen `VHS_TURN_DONE_N` marker VHS waits on (gated on `$VHS_DEMO`). Complements `timelog.py`. |
-| `gen_session_tape.py` | Prompts → a VHS tape that launches `claude` in the sandbox, types word-by-word, and `Wait`s on each turn's sentinel. |
+| `claude_sandbox.sh` | Stage an **isolated** Claude Code project: own `CLAUDE_CONFIG_DIR` (focus off, no dialogs, pinned model, credentials copied) + project hooks wiring `timelog.py` **and** the sentinel. |
+| `vhs_stop_sentinel.sh` | Stop hook printing the on-screen `VHS_TURN_DONE_N` marker VHS waits on (gated on `$VHS_DEMO`). |
+| `script.example.json` | The narration script: per turn `{prompt, intro, think, outro}` + top-level `open`/`close`. |
+| `gen_session_tape.py` | `script.json` → a VHS tape with deterministic intro/outro voice slots (sized to the synthesized clips), plus `plan.json` + `_voice/*.mp3`. |
+| `session_overlay.py` | Detects the real per-turn typing/submit frames, places each clip (intro leads typing, think rides the gap, outro/open/close in their slots), muxes the narration over `terminal.mp4` → `session.mp4` + `.srt`. |
+| `verify_session.py` | Gate: voice-leads-typing, think fits the gap, no overlap. Exit 0 PASS / 1 fixable / 2 structural. |
 
 ## Pipeline
 ```bash
 SR=engine/experimental/session-recorder
 DEMO=/tmp/sess
+rm -f "$SR/session-timeline.jsonl"          # one recording per timeline
 
-# 1) stage the clean, isolated sandbox (idempotent)
+# 1) clean isolated sandbox (idempotent)
 "$SR/live/claude_sandbox.sh" "$DEMO"
 
-# 2) author the session tape from your prompt list (one quoted arg = one turn)
-python3 "$SR/live/gen_session_tape.py" --demo "$DEMO" -o "$DEMO/session.tape" \
-  "write a Python function fizzbuzz(n) that prints FizzBuzz from 1 to n" \
-  "now add a docstring and a simple test"
+# 2) author tape + voice slots + plan.json from the narration script
+python3 "$SR/live/gen_session_tape.py" --demo "$DEMO" \
+        --script "$SR/live/script.example.json" -o "$DEMO/session.tape"
 
-# 3) film the real TUI  -> terminal.mp4  (+ session-timeline.jsonl from the hooks)
+# 3) film the real TUI -> terminal.mp4 (+ session-timeline.jsonl from the hooks)
 cd "$DEMO" && vhs session.tape
 
-# 4) narrate from the hook timecodes (reuses the parent tool; edge-tts zh-TW)
-python3 "$SR/gen_voiceover.py" --audio    # -> session-voiceover.{srt,mp3}
+# 4) place the narration (needs numpy -> repo venv) -> session.mp4 + .srt
+.venv/bin/python "$SR/live/session_overlay.py" --demo "$DEMO"
+
+# 5) gate the sync (loop until it passes)
+python3 "$SR/live/verify_session.py" --demo "$DEMO"
 ```
-Then pair `terminal.mp4` with the timecode-placed `session-voiceover.mp3`/`.srt`
-(or feed both into overlay "session mode" once that lands). To sanity-check a
-render, extract a frame near the end and confirm the response **and**
-`Stop says: VHS_TURN_DONE_N` are both visible.
+If step 5 reports a turn whose **think voice overruns** its real gap (claude
+answered too fast), shorten that turn's `think` line in the script and re-record
+(the outer loop). voice-leads-typing and overlaps are structural and should never
+fail; if they do it's a placement bug.
 
 ## Why the sandbox is non-negotiable (hard-won)
 Filming `claude` with your **normal** config fails in four ways — the sandbox

@@ -1,0 +1,19 @@
+{
+  "_comment": "Session narration script. 'open' plays over the entry screen just after `claude` launches; each turn has intro (BEFORE typing — voice-leads-typing), think (fills the spinner gap), outro (over the finished response); 'close' wraps up at the end. See docs/plans/2026-06-27-claude-session-voiceover-sync-design.md.",
+  "open": "我們在終端機輸入 claude，進入它的互動畫面，準備開始這次的程式示範。",
+  "close": "這次示範就到這裡，Claude 從零寫出並驗證了一個完整的函式。",
+  "turns": [
+    {
+      "prompt": "write a Python function fizzbuzz(n) that prints FizzBuzz from 1 to n",
+      "intro": "先請 Claude 寫一個 FizzBuzz 函式，從一數到 n。",
+      "think": "它正在組出迴圈，用整除十五先判 FizzBuzz，再判三和五。",
+      "outro": "函式完成了，能被三印 Fizz、被五印 Buzz、兩者皆是印 FizzBuzz。"
+    },
+    {
+      "prompt": "now add a docstring and a simple test",
+      "intro": "接下來請它補上說明文件，並加一個簡單測試。",
+      "think": "它在補 docstring，並寫一段擷取輸出來比對的測試。",
+      "outro": "測試通過了，這個 FizzBuzz 函式就完成並驗證過了。"
+    }
+  ]
+}
