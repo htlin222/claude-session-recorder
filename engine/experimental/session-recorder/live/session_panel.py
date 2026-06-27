@@ -99,10 +99,13 @@ TOOL = {"Write": ("✎", "建立檔案"), "Edit": ("✎", "修改檔案"), "Read
 def turn_panel(num, total, prompt, events, revealed, conclusion=None):
     """A turn's action list: rows appear as claude performs each tool call."""
     img, d = _new()
-    short = prompt if len(prompt) < 30 else prompt[:29] + "…"
-    _title(d, f"第 {num} / {total} 輪", short)
-    d.text((PAD, 110), "Claude 的動作", font=F(CJK, 21), fill=MUTED)
-    y = 150
+    short = prompt if len(prompt) < 26 else prompt[:25] + "…"
+    _title(d, f"第 {num} / {total} 輪", short)        # title y44, divider y92, sub y100
+    d.text((PAD, 148), "Claude 的動作", font=F(CJK, 21), fill=MUTED)
+    y = 188
+    if not events:                       # a pure-text turn (no tool calls)
+        d.text((PAD, y), "·", font=F(MONO, 24), fill=MUTED)
+        d.text((PAD + 40, y + 2), "Claude 直接以文字回覆", font=F(CJK, 20), fill=MUTED)
     for ev in events[:revealed]:
         icon, verb = TOOL.get(ev["tool"], ("•", ev["tool"]))
         col = ROLE["star"] if ev["tool"] in ("Bash",) else ROLE["ord"]
