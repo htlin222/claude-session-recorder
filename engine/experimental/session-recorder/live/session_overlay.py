@@ -38,10 +38,12 @@ FF = "/opt/homebrew/bin/ffmpeg"
 FPS = 12.5
 VOICE = "zh-TW-HsiaoChenNeural"
 RATE = "+0%"
-THINK_GUARD = 0.3       # keep this much of the real gap free after the think voice
+THINK_GUARD = 0.6       # free gap after the think voice (>= MIN_GAP so the think
+                        # always leaves a breath before the outro at `stop`)
 INTRO_GAP = 0.3         # silence between intro voice end and typing start
 OPEN_GAP = 0.3          # margin around the open clip
 OPEN_LEAD = 0.5         # open voice leads the launch-command typing by this much
+MIN_GAP = 0.5           # minimum silence between any two narration clips (breath)
 
 
 def dur(path):
@@ -182,22 +184,45 @@ def main():
         raise SystemExit(f"detected {len(regions)} prompt typings after ready, expected {n}. "
                          f"Tune the input band / threshold, or the recording differs.")
 
-    op = plan.get("open", {"dur": 0.0, "text": "", "mp3": ""})
+    op = plan.get("open", {})
     cl = plan.get("close", {"dur": 0.0, "text": "", "mp3": ""})
 
     segs = []        # (label, text, onset, dur, src_mp3, atempo)
     sync = {"video_total": round(vtot, 3), "ready": ready, "gaps": gaps,
             "regions": regions, "turns": []}
 
-    # open: narrate the LAUNCH. The launch typing is the FIRST thing in the tape
-    # (Sleep prelude, then `claude <flags>` paced to this narration), so its time
-    # is deterministic — place the open clip at `prelude` so the voice leads the
-    # typing (which starts prelude+open_lead) and plays through boot into ready.
-    if op["dur"]:
-        onset = plan.get("prelude", 2.0)
-        segs.append(("open", op["text"], round(onset, 3), op["dur"],
-                     os.path.join(demo, op["mp3"]), 1.0))
-        sync["open_onset"] = round(onset, 3)
+    # open: narrate the LAUNCH as separate per-flag beats (not one dense clip).
+    # The launch is the FIRST thing in the tape and paced deterministically, so
+    # each beat's video time is known: beat0 (intro) leads the base token; each
+    # flag beat starts when that flag is typed; the outro plays during boot.
+    prelude = plan.get("prelude", 2.0)
+    beats = op.get("beats", [])
+    open_lead = op.get("open_lead", 0.6)
+    beat_gap = op.get("beat_gap", 0.6)
+    cursor = prelude + open_lead               # where the base token is typed
+    for k, b in enumerate(beats):
+        onset = prelude if k == 0 else cursor  # beat0 leads the base by open_lead
+        if b.get("dur"):
+            segs.append((f"open{k}", b["text"], round(onset, 3), b["dur"],
+                         os.path.join(demo, b["mp3"]), 1.0))
+        cursor += b.get("dur", 0.0) + beat_gap
+    # open outro ("…進入互動畫面") plays at Enter, through boot, into the entry
+    # screen — but turn 1 may start right after a fast boot, leaving little room.
+    # FIT it to the window before turn-1's intro (content-trim), or DROP it if
+    # there's no room (the flags are already narrated; the outro is just flavor).
+    outro = op.get("outro", {"dur": 0.0})
+    if outro.get("dur"):
+        first_intro = regions[0][0] - turns[0]["intro"]["dur"] - INTRO_GAP
+        budget = first_intro - MIN_GAP - cursor
+        if budget >= 1.0:
+            otext, omp3, odur, _ = fit_think(outro["text"], os.path.join(demo, outro["mp3"]),
+                                             budget, demo, "open_outro")
+            segs.append(("open_outro", otext, round(cursor, 3), odur, omp3, 1.0))
+            sync["open_outro_dropped"] = False
+        else:
+            sync["open_outro_dropped"] = True   # no room before turn 1 — omit it
+    sync["open_beats"] = [{"onset": s[2], "dur": s[3], "text": s[1]}
+                          for s in segs if s[0].startswith("open")]
 
     last_stop = ready
     for i, tn in enumerate(turns):
@@ -232,20 +257,29 @@ def main():
             "think_fits_gap": round(th_dur, 3) <= round(gaps[i] - THINK_GUARD + 0.05, 3),
         })
 
-    # close: over the ending, AFTER the last placed voice finishes (the last
-    # outro outlasts last_stop, so anchor on the max end to avoid overlap)
+    # close: over the ending, AFTER the last placed voice finishes (+ a full
+    # breath, so it never butts against the last outro)
     if cl["dur"]:
         voice_end = max((on + d for _l, _t, on, d, _m, _a in segs), default=last_stop)
-        onset = round(max(last_stop + 0.5, voice_end + 0.4), 3)
+        onset = round(max(last_stop + 0.5, voice_end + MIN_GAP), 3)
         segs.append(("close", cl["text"], onset, cl["dur"],
                      os.path.join(demo, cl["mp3"]), 1.0))
         sync["close_onset"] = onset
 
-    # report any overlap between consecutive narration clips (would double-talk)
+    # consecutive-clip spacing: report hard overlaps AND gaps tighter than MIN_GAP
+    # (a 0.4s gap isn't an overlap but still sounds like one sentence runs into the
+    # next — the gate must catch both).
     ordered = sorted(((on, on + d, lab) for lab, _t, on, d, _m, _a in segs))
     overlaps = [(ordered[k-1][2], ordered[k][2]) for k in range(1, len(ordered))
                 if ordered[k][0] < ordered[k-1][1] - 0.05]
+    tight = [{"prev": ordered[k-1][2], "next": ordered[k][2],
+              "gap": round(ordered[k][0] - ordered[k-1][1], 3)}
+             for k in range(1, len(ordered))
+             if 0 <= ordered[k][0] - ordered[k-1][1] < MIN_GAP - 0.05]
     sync["overlaps"] = overlaps
+    sync["tight_gaps"] = tight
+    sync["min_gap"] = round(min((ordered[k][0] - ordered[k-1][1]
+                                 for k in range(1, len(ordered))), default=9.0), 3)
 
     # report + subtitles first (so verify_session runs even if the mux fails)
     json.dump(sync, open(os.path.join(demo, "session_sync.json"), "w"),

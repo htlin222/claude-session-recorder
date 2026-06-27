@@ -37,26 +37,35 @@ def main():
         note = "  [think auto-shortened to fit]" if (t.get("think_trimmed") and t["think_fits_gap"]) else ""
         print(f"  turn {t['index']}: lead<type={t['voice_leads_typing']} "
               f"think_fits={t['think_fits_gap']} gap={t['real_gap']}s{flag}{note}")
-    if "open_onset" in s:
-        print(f"  open @ {s['open_onset']}s   close @ {s.get('close_onset','-')}s")
+    nbeats = len(s.get("open_beats", []))
+    print(f"  open: {nbeats} launch beats   close @ {s.get('close_onset','-')}s   "
+          f"min clip gap {s.get('min_gap','?')}s")
 
     overlaps = s.get("overlaps", [])
+    tight = s.get("tight_gaps", [])
     if overlaps:
         print(f"  overlapping narration: {overlaps}")
+    if tight:
+        print(f"  too-tight gaps (< breath): " +
+              ", ".join(f"{g['prev']}->{g['next']} {g['gap']}s" for g in tight))
     if leads or neg or overlaps:
         print(f"\nFAIL (not fixable): {len(leads)} turn(s) where voice trails typing, "
               f"{len(neg)} negative onset(s), {len(overlaps)} narration overlap(s) — "
               f"placement bug.")
         raise SystemExit(2)
-    if unfit:
-        print(f"\nFAIL (fixable): {len(unfit)} turn(s) whose think line overruns the gap "
-              f"even after shortening to its first clause — claude answered too fast. "
-              f"Rewrite a shorter think line (or make the prompt take longer) and re-record. "
-              f"Turns: {[t['index'] for t in unfit]}")
+    if unfit or tight:
+        if unfit:
+            print(f"\nFAIL (fixable): {len(unfit)} turn(s) whose think line overruns the gap "
+                  f"even shortened (claude answered too fast). Shorten that think line or make "
+                  f"the prompt longer, and re-record. Turns: {[t['index'] for t in unfit]}")
+        if tight:
+            print(f"\nFAIL (fixable): {len(tight)} narration gap(s) tighter than a breath — "
+                  f"the previous sentence runs into the next. Widen the offending margin "
+                  f"(BEAT_GAP/THINK_GUARD/close) and re-run.")
         raise SystemExit(1)
-    msg = "PASS: voice leads every prompt; every think line fits its gap"
+    msg = "PASS: voice leads every prompt; think fits every gap; all clips breathe"
     if trimmed:
-        msg += f" ({len(trimmed)} auto-shortened to fit: turns {[t['index'] for t in trimmed]})"
+        msg += f" ({len(trimmed)} think auto-shortened: turns {[t['index'] for t in trimmed]})"
     print(f"\n{msg}.")
 
 

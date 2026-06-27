@@ -40,6 +40,7 @@ HOLD = 1.0              # silence after outro before quitting / next turn
 OPEN_LEAD = 0.6         # the open voice leads the launch-command typing by this much
 CLOSE_HOLD = 1.0        # silence after the close narration before quitting
 PRELUDE = 2.0           # Sleep before the launch typing (shell prompt settles)
+BEAT_GAP = 0.6          # silence between consecutive launch-flag narrations
 
 
 def synth(text, out_mp3):
@@ -82,26 +83,33 @@ def emit(spec, demo, voice_dir, theme, font_size, width, height,
     # flag is on screen exactly while we explain it. The pause after a token = the
     # duration of that token's narration. What's narrated == typed == executed.
     lc = spec.get("launch", {"base": "claude", "flags": [], "intro": "", "outro": ""})
-    # beats: (token_to_type, narration_for_it). base carries the intro line;
-    # each flag carries its own say; the outro plays during boot.
+    # beats: (token_to_type, narration). base carries the intro; each flag its
+    # own say. Each beat is a SEPARATE clip (not one dense combined clip — that
+    # reads sentences back-to-back and sounds rushed); placed with BEAT_GAP of
+    # breathing room. The outro is its own clip played during boot.
     beats = [(lc.get("base", "claude"), lc.get("intro", ""))]
     for f in lc.get("flags", []):
         beats.append((f["arg"], f.get("say", "")))
-    open_text = (lc.get("intro", "") + "".join(f.get("say", "") for f in lc.get("flags", []))
-                 + lc.get("outro", ""))
-    # one continuous open clip (placed as a whole); per-beat synth only sizes pauses
-    open_dur = synth(open_text, os.path.join(voice_dir, "open.mp3")) if open_text else 0.0
     a(f"Sleep {OPEN_LEAD:.3f}s          # OPEN: voice leads the launch typing")
+    beat_meta, tokens = [], []
     for ti, (tok, say) in enumerate(beats):
+        tokens.append(tok)
         a(f'Type "{tok}"' if ti == 0 else f'Type " {tok}"')
-        hold = synth(say, os.path.join(voice_dir, f"_open_beat{ti}.mp3")) if say else 0.0
-        a(f"Sleep {hold + 0.25:.3f}s   # hold `{tok}` while its narration plays ({hold:.2f}s)")
+        mp3 = os.path.join(voice_dir, f"open_beat{ti}.mp3")
+        d = synth(say, mp3) if say else 0.0
+        a(f"Sleep {d + BEAT_GAP:.3f}s   # hold `{tok}` while its narration plays ({d:.2f}s)")
+        beat_meta.append({"text": say, "token": tok,
+                          "mp3": os.path.relpath(mp3, demo) if d else "", "dur": d})
     a("Enter")
     a(f"Wait+Screen@{startup_to}s /shift\\+tab|for shortcuts/")
     a("")
-    plan["open"] = {"text": open_text, "command": " ".join(t for t, _ in beats),
-                    "mp3": os.path.relpath(os.path.join(voice_dir, "open.mp3"), demo) if open_dur else "",
-                    "dur": open_dur}
+    outro_mp3 = os.path.join(voice_dir, "open_outro.mp3")
+    outro_dur = synth(lc["outro"], outro_mp3) if lc.get("outro") else 0.0
+    plan["open"] = {"command": " ".join(tokens), "open_lead": OPEN_LEAD,
+                    "beat_gap": BEAT_GAP, "beats": beat_meta,
+                    "outro": {"text": lc.get("outro", ""),
+                              "mp3": os.path.relpath(outro_mp3, demo) if outro_dur else "",
+                              "dur": outro_dur}}
     for i, t in enumerate(turns, 1):
         # pre-synthesize the deterministic (intro/outro) AND the gap (think) voice
         intro_mp3 = os.path.join(voice_dir, f"intro_{i}.mp3")

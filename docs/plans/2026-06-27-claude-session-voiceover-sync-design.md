@@ -87,6 +87,10 @@ loop-engineering 套到「拍 claude 自己」這條非決定性路徑上。
    超出（裁到第一句後仍超 → claude 秒回）→ FAIL_FIXABLE（外層：改短 think 句或加大 prompt 重錄）。
 3. **旁白沒溢出** — 沿用 v6 `min_gap`（每段語音在自己槽內講完）。
 4. **成品長度 >= 旁白總長**（沿用）。
+5. **最小間隔** — 任兩段相鄰旁白 clip 間隔 >= MIN_GAP（~0.5s）。只擋硬重疊不夠：
+   0.4s 的間隔聽起來仍像「前句沒講完後句就上來」。開場改逐 flag 獨立 clip（非一段
+   連讀）；放不下的收尾語（open outro）採 fit-or-drop：先裁短，窗口太小就略過，
+   絕不壓到下一句。THINK_GUARD >= MIN_GAP 確保 think 與 outro 間也留得下一口氣。
 
 ## YAGNI（明確不做）
 
