@@ -30,7 +30,7 @@ def beat_end(beat):
     if vis:
         ends.append(vis["end"])
     p = beat.get("panel")
-    if p and "switch_at" in p:
+    if p and p.get("switch_at"):     # a switch at literal 0.0 is panel init, not beat activity
         ends.append(p["switch_at"])
     return max(ends) if ends else 0.0
 
@@ -45,7 +45,7 @@ def beat_start(beat):
     if vis:
         starts.append(vis["start"])
     p = beat.get("panel")
-    if p and "switch_at" in p:
+    if p and p.get("switch_at"):     # a switch at literal 0.0 is panel init, not beat activity
         starts.append(p["switch_at"])
     return min(starts) if starts else 0.0
 
