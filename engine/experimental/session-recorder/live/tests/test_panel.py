@@ -1,0 +1,44 @@
+import os
+
+import pytest
+
+import panel
+
+HAVE_PIL = panel.Image is not None
+HAVE_FONT = os.path.exists(panel.CJK)
+
+
+def test_keyframe_times_read_from_ledger_not_redetected():
+    led = {"meta": {"segments": [
+        {"kind": "boot", "turn_idx": -1, "out": [0.0, 6.0]},
+        {"kind": "soft", "role": "pre", "turn_idx": 0, "out": [6.0, 9.0]},
+        {"kind": "hard", "turn_idx": 0, "raw": [9.0, 14.0], "submit": 11.0, "out": [9.0, 14.0]},
+        {"kind": "soft", "role": "tail", "out": [14.0, 16.0]},
+    ]}, "beats": [
+        {"kind": "launch_flag", "turn_idx": -1, "panel": {"switch_at": 0.5}, "drop": False},
+        {"kind": "launch_flag", "turn_idx": -1, "panel": {"switch_at": 2.0}, "drop": False},
+        {"kind": "intro", "turn_idx": 0, "panel": {"switch_at": 6.5}, "drop": False},
+        {"kind": "think", "turn_idx": 0, "visual": {"start": 11.0, "end": 14.0},
+         "panel": {"switch_at": 11.0}, "drop": False},
+    ]}
+    keys = panel.keyframe_times(led)
+    launch = [round(k["t"], 1) for k in keys if k["type"] == "launch"]
+    assert launch == [0.5, 2.0]                       # two flag reveals from the ledger
+    assert any(k["type"] == "turn_header" and abs(k["t"] - 6.5) < 1e-9 for k in keys)
+    assert any(k["type"] == "conclusion" and abs(k["t"] - 14.0) < 1e-9 for k in keys)
+
+
+@pytest.mark.skipif(not (HAVE_PIL and HAVE_FONT), reason="needs Pillow + Hiragino font")
+def test_render_panels_are_valid_images(tmp_path):
+    from PIL import Image
+
+    flags = [{"arg": "--model opus", "say": "用 opus 模型"}]
+    lp = tmp_path / "launch.png"
+    panel.launch_panel("claude", flags, 1).save(lp)
+    tp = tmp_path / "turn.png"
+    panel.turn_panel(1, 2, "請它寫一個函式", [{"tool": "Write", "target": "a.py"}],
+                     1, "完成了").save(tp)
+    for p in (lp, tp):
+        assert p.exists()
+        with Image.open(p) as im:
+            assert im.size == (panel.PANEL_W, panel.H)
