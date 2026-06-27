@@ -18,7 +18,7 @@ lights up while typing, clears on submit) — not tape arithmetic, which drifts.
 | --- | --- |
 | `claude_sandbox.sh` | Stage an **isolated** Claude Code project: own `CLAUDE_CONFIG_DIR` (focus off, no dialogs, pinned model, credentials copied) + project hooks wiring `timelog.py` **and** the sentinel. |
 | `vhs_stop_sentinel.sh` | Stop hook printing the on-screen `VHS_TURN_DONE_N` marker VHS waits on (gated on `$VHS_DEMO`). |
-| `script.example.json` | The narration script: per turn `{prompt, intro, think, outro}` + top-level `open`/`close`. |
+| `script.example.json` | The narration script: a `launch` block (the opening CLI lesson), per-turn `{prompt, intro, think, outro}`, and a `close`. |
 | `gen_session_tape.py` | `script.json` → a VHS tape with deterministic intro/outro voice slots (sized to the synthesized clips), plus `plan.json` + `_voice/*.mp3`. |
 | `session_overlay.py` | Detects the real per-turn typing/submit frames, places each clip (intro leads typing, think rides the gap, outro/open/close in their slots), muxes the narration over `terminal.mp4` → `session.mp4` + `.srt`. |
 | `verify_session.py` | Gate: voice-leads-typing, think fits the gap, no overlap. Exit 0 PASS / 1 fixable / 2 structural. |
@@ -49,6 +49,26 @@ If step 5 reports a turn whose **think voice overruns** its real gap (claude
 answered too fast), shorten that turn's `think` line in the script and re-record
 (the outer loop). voice-leads-typing and overlaps are structural and should never
 fail; if they do it's a placement bug.
+
+## The opening is a CLI lesson
+The `launch` block treats starting `claude` like the repo's rsync/jq lessons:
+the command is typed **token-by-token**, each flag **held on screen while its own
+narration plays** (sync-model v5 hero-command pacing), and what's narrated is
+exactly what's typed and run (`base` + each flag's `arg`). Example:
+```json
+"launch": {
+  "base": "claude",
+  "flags": [
+    {"arg": "--model opus", "say": "加上 model opus 指定模型，"},
+    {"arg": "--permission-mode bypassPermissions", "say": "再用 permission mode bypass，讓示範自動執行、不問權限。"}
+  ],
+  "intro": "我們用 claude 啟動，", "outro": "稍候就進入互動畫面。"
+}
+```
+The open clip is placed at the deterministic `prelude` (the launch is the FIRST
+thing in the tape, so no detection needed); it leads the typing and plays through
+boot into the entry screen. Keep `bypassPermissions`/`--dangerously-skip-permissions`
+in the launch — the recording needs it (the sandbox pre-accepts the mode).
 
 ## Why the sandbox is non-negotiable (hard-won)
 Filming `claude` with your **normal** config fails in four ways — the sandbox

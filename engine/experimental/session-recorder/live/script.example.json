@@ -1,6 +1,14 @@
 {
-  "_comment": "Session narration script. 'open' plays over the entry screen just after `claude` launches; each turn has intro (BEFORE typing — voice-leads-typing), think (fills the spinner gap), outro (over the finished response); 'close' wraps up at the end. See docs/plans/2026-06-27-claude-session-voiceover-sync-design.md.",
-  "open": "我們在終端機輸入 claude，進入它的互動畫面，準備開始這次的程式示範。",
+  "_comment": "Session narration script. 'launch' is the opening CLI-lesson: the `claude` command is typed token-by-token and the narration dissects each flag in typing order (like the rsync/jq lessons); it plays over the launch + boot into the entry screen. Each turn has intro (BEFORE typing — voice-leads-typing), think (fills the spinner gap), outro (over the finished response); 'close' wraps up. The launch command that RUNS is base + each flag's arg, so what's narrated = typed = executed. See docs/plans/2026-06-27-claude-session-voiceover-sync-design.md.",
+  "launch": {
+    "base": "claude",
+    "flags": [
+      {"arg": "--model opus", "say": "加上 model opus 指定模型，"},
+      {"arg": "--permission-mode bypassPermissions", "say": "再用 permission mode bypass，讓示範自動執行、不問權限。"}
+    ],
+    "intro": "我們用 claude 啟動，",
+    "outro": "稍候就進入互動畫面。"
+  },
   "close": "這次示範就到這裡，Claude 從零寫出並驗證了一個完整的函式。",
   "turns": [
     {

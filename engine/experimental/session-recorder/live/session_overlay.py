@@ -41,6 +41,7 @@ RATE = "+0%"
 THINK_GUARD = 0.3       # keep this much of the real gap free after the think voice
 INTRO_GAP = 0.3         # silence between intro voice end and typing start
 OPEN_GAP = 0.3          # margin around the open clip
+OPEN_LEAD = 0.5         # open voice leads the launch-command typing by this much
 
 
 def dur(path):
@@ -116,9 +117,11 @@ def detect_ready(full):
     return 0.0
 
 
-def detect_typing(inp, n_expected):
-    """Return [(typing_start, submit)] per turn: contiguous spans where the input
-    band sits well above its idle (cursor-blink) level."""
+def detect_typing(inp):
+    """Return [(typing_start, submit)] for every contiguous span where the input
+    band sits well above its idle (cursor-blink) level. Includes the launch
+    command typed in the shell before claude boots — the caller splits on
+    claude-ready (launch spans come before it, prompt spans after)."""
     idle = float(np.median(inp[inp > 0]))
     thr = idle + 30
     hot = inp > thr
@@ -132,9 +135,6 @@ def detect_typing(inp, n_expected):
             i = j
         else:
             i += 1
-    if len(regs) != n_expected:
-        raise SystemExit(f"detected {len(regs)} typing spans, expected {n_expected}. "
-                         f"Tune the input band / threshold, or the recording differs.")
     return regs
 
 
@@ -173,7 +173,14 @@ def main():
 
     full, inp = signals(video)
     ready = detect_ready(full)
-    regions = detect_typing(inp, n)          # [(typing_start, submit)] per turn
+    all_regions = detect_typing(inp)
+    # the n PROMPT typings are the spans after claude-ready (the launch typing in
+    # the shell sits before it; we don't rely on detecting it — its position is
+    # deterministic: nothing variable precedes it in the tape).
+    regions = [r for r in all_regions if r[0] >= ready]
+    if len(regions) != n:
+        raise SystemExit(f"detected {len(regions)} prompt typings after ready, expected {n}. "
+                         f"Tune the input band / threshold, or the recording differs.")
 
     op = plan.get("open", {"dur": 0.0, "text": "", "mp3": ""})
     cl = plan.get("close", {"dur": 0.0, "text": "", "mp3": ""})
@@ -182,11 +189,12 @@ def main():
     sync = {"video_total": round(vtot, 3), "ready": ready, "gaps": gaps,
             "regions": regions, "turns": []}
 
-    # open: just after claude-ready, ending before turn-1's intro begins
+    # open: narrate the LAUNCH. The launch typing is the FIRST thing in the tape
+    # (Sleep prelude, then `claude <flags>` paced to this narration), so its time
+    # is deterministic — place the open clip at `prelude` so the voice leads the
+    # typing (which starts prelude+open_lead) and plays through boot into ready.
     if op["dur"]:
-        intro0 = turns[0]["intro"]["dur"]
-        latest = regions[0][0] - intro0 - INTRO_GAP - op["dur"] - OPEN_GAP
-        onset = max(ready + OPEN_GAP, latest)
+        onset = plan.get("prelude", 2.0)
         segs.append(("open", op["text"], round(onset, 3), op["dur"],
                      os.path.join(demo, op["mp3"]), 1.0))
         sync["open_onset"] = round(onset, 3)
