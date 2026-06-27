@@ -30,8 +30,10 @@ from PIL import Image, ImageDraw, ImageFont
 FF = "/opt/homebrew/bin/ffmpeg"
 CW, H, TERM_W = 1920, 1080, 1200
 PANEL_W = CW - TERM_W                       # 720
-MONO = "/System/Library/Fonts/Menlo.ttc"
+# one font for the whole panel (Hiragino renders both Latin and CJK) — keeps the
+# panel visually unified; the real terminal on the left stays monospaced.
 CJK = "/System/Library/Fonts/Hiragino Sans GB.ttc"
+MONO = CJK
 BG = (24, 24, 37)
 TEXT = (205, 214, 244)
 MUTED = (127, 132, 156)
@@ -60,34 +62,39 @@ def _title(d, text, sub=None):
 
 
 def launch_panel(command, flags, revealed):
-    """`claude <flags>` with the first `revealed` flags shown + annotated."""
+    """`claude <flags>` with the first `revealed` flags shown + annotated. The
+    command echo wraps within the panel and the annotation boxes auto-size to
+    their note text, so nothing overflows."""
     img, d = _new()
     _title(d, "啟動 Claude Code", "claude 指令與旗標")
-    # echoed command, colouring the revealed flag args
-    y = 150
-    d.text((PAD, y), "$ claude", font=F(MONO, 24), fill=TEXT)
-    x = PAD + d.textlength("$ claude ", font=F(MONO, 24))
+    fc, fa = F(MONO, 23), F(MONO, 21)
     colours = [ROLE["ord"], ROLE["star"], ROLE["blue"], ROLE["yellow"]]
+    rmax = PANEL_W - PAD
+    # echoed command, colouring the revealed flag args; wrap when it would overflow
+    y = 152
+    d.text((PAD, y), "$ claude", font=fc, fill=TEXT)
+    x = PAD + d.textlength("$ claude ", font=fc)
+    for i, f in enumerate(flags[:revealed]):
+        col, seg = colours[i % len(colours)], f["arg"]
+        if x + d.textlength(seg, font=fa) > rmax:
+            y += 38; x = PAD + 24
+        d.text((x, y + 1), seg, font=fa, fill=col)
+        w = d.textlength(seg, font=fa)
+        d.line([(x, y + 30), (x + w, y + 30)], fill=col, width=3)   # short stub
+        x += w + d.textlength("  ", font=fa)
+    # annotations: a colour-barred box per revealed flag, height fits the note
+    ay = y + 76
     for i, f in enumerate(flags[:revealed]):
         col = colours[i % len(colours)]
-        seg = f["arg"]
-        if x + d.textlength(seg + " ", font=F(MONO, 22)) > PANEL_W - PAD:
-            y += 36; x = PAD + 24
-        d.text((x, y + 2), seg, font=F(MONO, 22), fill=col)
-        d.line([(x, y + 32), (x + d.textlength(seg, font=F(MONO, 22)), y + 32)],
-               fill=col, width=3)                            # short stub
-        x += d.textlength(seg + "  ", font=F(MONO, 22))
-    # annotations, one row per revealed flag (colour-matched left bar + label)
-    ay = y + 84
-    for i, f in enumerate(flags[:revealed]):
-        col = colours[i % len(colours)]
-        d.rectangle([PAD, ay, PANEL_W - PAD, ay + 78], fill=HL)
-        d.line([(PAD, ay), (PAD, ay + 78)], fill=col, width=5)
-        d.text((PAD + 20, ay + 10), f["arg"], font=F(MONO, 20), fill=col)
         note = f.get("note") or f.get("say", "")
-        for li, ln in enumerate(_wrap(d, note, F(CJK, 20), PANEL_W - 2 * PAD - 40)[:2]):
-            d.text((PAD + 20, ay + 40 + li * 26), ln, font=F(CJK, 20), fill=TEXT)
-        ay += 98
+        lines = _wrap(d, note, F(CJK, 20), rmax - PAD - 24)[:3]
+        bh = 44 + len(lines) * 28
+        d.rectangle([PAD, ay, rmax, ay + bh], fill=HL)
+        d.line([(PAD, ay), (PAD, ay + bh)], fill=col, width=5)
+        d.text((PAD + 20, ay + 10), f["arg"], font=F(MONO, 19), fill=col)
+        for li, ln in enumerate(lines):
+            d.text((PAD + 20, ay + 42 + li * 28), ln, font=F(CJK, 20), fill=TEXT)
+        ay += bh + 18
     return img
 
 
@@ -135,8 +142,7 @@ def turn_panel(num, total, prompt, events, revealed, conclusion=None):
     if conclusion:
         cy = H - 240
         d.line([(PAD, cy), (PANEL_W - PAD, cy)], fill=(52, 54, 66), width=2)
-        draw_icon(d, PAD, cy + 18, "check", ROLE["ord"], sz=22)
-        d.text((PAD + 36, cy + 16), "完成", font=F(CJK, 22), fill=ROLE["ord"])
+        d.text((PAD, cy + 16), "完成", font=F(CJK, 22), fill=ROLE["ord"])
         for li, ln in enumerate(_wrap(d, conclusion, F(CJK, 20), PANEL_W - 2 * PAD)[:5]):
             d.text((PAD, cy + 52 + li * 30), ln, font=F(CJK, 20), fill=TEXT)
     return img
