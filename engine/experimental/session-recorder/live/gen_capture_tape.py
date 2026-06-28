@@ -2,12 +2,19 @@
 """gen_capture_tape.py — script.json -> a MINIMAL VHS tape that films a real
 Claude Code TUI for the v6 deterministic pipeline (Phase 0: capture).
 
-The v6 change vs v5's gen_session_tape.py: there is NO voice here. v5
-synthesized intro/think/outro up front and SIZED the soft Sleeps to fit each
-clip (voice-leads-typing). v6 instead captures with FIXED tiny pads and
-re-times everything later by splicing freeze-frames against the synthesized
-narration. So this tape has NO edge-tts, NO voice clips, NO voice-sized Sleeps
-— only the fixed PAD/PRE_ENTER/PRELUDE constants.
+The v6 change vs v5's gen_session_tape.py: the PER-TURN parts carry NO voice
+here. v5 synthesized intro/think/outro up front and SIZED the soft Sleeps to fit
+each clip; v6 instead captures the turns with FIXED tiny pads and re-times them
+later by splicing freeze-frames against the synthesized narration.
+
+The ONE exception is the LAUNCH. The launch is the deterministic shell region
+(it runs BEFORE `claude` exists, so there is no nondeterministic think gap and
+no reason to capture-then-splice it). So — exactly like v5 — the launch typing
+is VOICE-PACED here: each flag is narrated FIRST, then its token is typed, so
+the boot animation advances WITH the narration instead of holding one static
+frame for ~15s while the launch narration plays. The launch voice clips are
+synthesized in main() and their raw onsets recorded in capture.json for author
+to reuse (it does NOT re-synth the launch). The per-turn parts stay voice-free.
 
 It films `terminal_raw.mp4` and writes a `capture.json` describing the structure
 detect_anchors needs: n turns, per-turn `type_dur`, prompts, launch token list.
@@ -26,16 +33,44 @@ Example:
 import argparse
 import json
 import os
+import subprocess
 
 THEMES = {"dark": "Catppuccin Mocha", "light": "Catppuccin Latte"}
 PAD = 0.4          # fixed tiny soft pad around each action (no voice sizing)
 PRELUDE = 2.0      # Sleep before the launch typing (shell prompt settles)
 PRE_ENTER = 0.4    # beat after typing finishes, before Enter
+LBREATH = 0.5      # breath after each voice-paced launch token (== ledger BREATH)
+
+VOICE = "zh-TW-HsiaoChenNeural"
+RATE = "+0%"
+
+
+def synth(text, out_mp3):           # I/O boundary (mirrors author.synth)
+    subprocess.run(["edge-tts", "--voice", VOICE, "--rate", RATE,
+                    "--text", text, "--write-media", out_mp3],
+                   check=True, capture_output=True)
+    return _dur(out_mp3)
+
+
+def _dur(path):
+    return float(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", path], capture_output=True, text=True).stdout or 0)
 
 
 def render(spec, demo, width, height, font_size, word_delay,
-           startup_to=60, turn_to=120, theme="Catppuccin Mocha"):
-    """Pure: build (tape_str, plan) from spec. Writes NOTHING to disk."""
+           startup_to=60, turn_to=120, theme="Catppuccin Mocha",
+           launch_voice=None, launch_outro=None):
+    """Pure: build (tape_str, plan) from spec. Writes NOTHING to disk.
+
+    `launch_voice` (optional): a list of `{token, text, mp3, dur}` for the
+    base+each-flag launch beats; `launch_outro` an optional `{text, mp3, dur}`.
+    When provided, the launch is VOICE-PACED — each token's narration plays
+    (`Sleep <dur>`) BEFORE the token is typed, so the boot animation advances
+    WITH the narration instead of being freeze-extended for ~15s. The launch is
+    the deterministic shell region (it runs before `claude` exists, so there is
+    no nondeterministic think gap), so sizing it to the voice here is safe.
+    When None, the legacy fixed-PAD path is used (unit tests / back-compat)."""
     turns = spec["turns"]
     cfg = os.path.join(os.path.abspath(demo), ".cfg")
     timeline = os.path.join(os.path.abspath(demo), "session-timeline.jsonl")
@@ -72,17 +107,45 @@ def render(spec, demo, width, height, font_size, word_delay,
     a(f'Env ZDOTDIR "{os.path.join(cfg, "zdotdir")}"')
     a("")
     a(f"Sleep {PRELUDE:.0f}s                   # let the shell prompt settle")
-    # LAUNCH typed token-by-token: `claude`, then each flag (leading space),
-    # with a fixed PAD between tokens. No narration.
-    for ti, tok in enumerate(tokens):
-        a(f'Type "{tok}"' if ti == 0 else f'Type " {tok}"')
-        a(f"Sleep {PAD:.3f}s   # fixed pad after token")
-    a("Enter")
-    a(f"Wait+Screen@{startup_to}s /shift\\+tab|for shortcuts/")
+    launch_plan = {"tokens": tokens, "base": base, "flags": flags}
+    if launch_voice:
+        # VOICE-PACED launch: narrate each token FIRST (Sleep<dur>), THEN type it,
+        # then a breath. Tracks cumulative raw tape time so each beat's onset `at`
+        # (when its narration Sleep begins) is recorded for author to reuse. The
+        # outro plays during the boot Wait, so it needs no extra Sleep here — only
+        # its onset (the Enter time) is recorded.
+        cur = float(PRELUDE)
+        beats_plan = []
+        for bi, lv in enumerate(launch_voice):
+            tok, d = lv["token"], float(lv["dur"])
+            at = round(cur, 3)
+            note = "narrate intro" if bi == 0 else "narrate flag, token not shown yet"
+            a(f"Sleep {d:.3f}s   # {note}")
+            a(f'Type "{tok}"' if bi == 0 else f'Type " {tok}"')
+            a(f"Sleep {LBREATH:.3f}s   # breath after the token appears")
+            beats_plan.append({"token": tok, "text": lv.get("text", ""),
+                               "mp3": lv["mp3"], "dur": round(d, 3), "at": at})
+            cur += d + LBREATH
+        a("Enter")
+        a(f"Wait+Screen@{startup_to}s /shift\\+tab|for shortcuts/")
+        launch_plan["beats"] = beats_plan
+        if launch_outro:
+            launch_plan["outro"] = {"text": launch_outro.get("text", ""),
+                                    "mp3": launch_outro["mp3"],
+                                    "dur": round(float(launch_outro["dur"]), 3),
+                                    "at": round(cur, 3)}    # rides boot from Enter
+    else:
+        # LEGACY fixed-PAD launch: typed token-by-token with a fixed PAD between
+        # tokens. No narration (back-compat / unit tests).
+        for ti, tok in enumerate(tokens):
+            a(f'Type "{tok}"' if ti == 0 else f'Type " {tok}"')
+            a(f"Sleep {PAD:.3f}s   # fixed pad after token")
+        a("Enter")
+        a(f"Wait+Screen@{startup_to}s /shift\\+tab|for shortcuts/")
     a("")
 
     plan = {
-        "launch": {"tokens": tokens, "base": base, "flags": flags},
+        "launch": launch_plan,
         "pre_enter": PRE_ENTER, "prelude": PRELUDE, "pad": PAD,
         "turns": [],
     }
@@ -129,9 +192,38 @@ def main():
     args = ap.parse_args()
     spec = json.load(open(args.script, encoding="utf-8"))
     tape_path = args.output or os.path.join(args.demo, "session.tape")
+
+    # Synthesize the LAUNCH voice up front (this is the only voice the capture
+    # tape needs — the launch is the deterministic shell region, so its typing is
+    # paced to the narration here; the per-turn intro/think/outro stay voice-free).
+    lc = spec.get("launch", {}) or {}
+    launch_voice, launch_outro = None, None
+    if lc.get("intro") or any(f.get("say") for f in lc.get("flags", [])):
+        voice_dir = os.path.join(args.demo, "_voice")
+        os.makedirs(voice_dir, exist_ok=True)
+        base = lc.get("base", "claude")
+        launch_voice = []
+        intro = lc.get("intro", "")
+        bm = os.path.join(voice_dir, "open_intro.mp3")
+        bd = synth(intro, bm) if intro else 0.0
+        launch_voice.append({"token": base, "text": intro,
+                             "mp3": os.path.relpath(bm, args.demo), "dur": round(bd, 3)})
+        for k, f in enumerate(lc.get("flags", [])):
+            say, arg = f.get("say", ""), f["arg"]
+            m = os.path.join(voice_dir, f"open_flag{k}.mp3")
+            d = synth(say, m) if say else 0.0
+            launch_voice.append({"token": arg, "text": say,
+                                 "mp3": os.path.relpath(m, args.demo), "dur": round(d, 3)})
+        outro_txt = lc.get("outro", "")
+        if outro_txt:
+            om = os.path.join(voice_dir, "open_outro.mp3")
+            launch_outro = {"text": outro_txt, "mp3": os.path.relpath(om, args.demo),
+                            "dur": round(synth(outro_txt, om), 3)}
+
     tape, plan = render(spec, args.demo, args.width, args.height, args.font_size,
                         args.word_delay, args.startup_timeout, args.turn_timeout,
-                        THEMES[args.theme])
+                        THEMES[args.theme], launch_voice=launch_voice,
+                        launch_outro=launch_outro)
     open(tape_path, "w").write(tape)
     json.dump(plan, open(os.path.join(args.demo, "capture.json"), "w"),
               ensure_ascii=False, indent=2)

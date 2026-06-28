@@ -7,10 +7,14 @@ Model — leads never drop; only rides drop. The soft regions STRETCH to fit the
 lead voice, so intro/outro/launch/close are always placed. Only the `think` beat
 RIDES the fixed hard gap [submit, done] and is fit-or-dropped.
 
-  boot segment      -> all launch beats (intro + each flag say + outro), paced
-                       from the boot out-start with BREATH between; the boot is
-                       freeze-EXTENDED if the launch voice is longer than the
-                       captured animation (the static entry screen is held).
+  boot segment      -> the launch beats. When the capture VOICE-PACED the launch
+                       (capture.json carries launch beats with `at`+`mp3`), those
+                       clips are REUSED and placed at their captured raw onsets,
+                       and the boot is copied 1:1 (no freeze-extend) — the capture
+                       was already paced to the voice, so the boot is real
+                       animation, not a 15s frozen frame. FALLBACK (no captured
+                       beats): synth the launch and freeze-EXTEND the boot to host
+                       it (the static entry screen is held).
   pre soft (turn i) -> previous turn's outro (i>=1) then turn i's intro, sized so
                        the intro ENDS exactly INTRO_GAP before typing starts.
   hard (turn i)     -> turn i's think (ride). submit maps to output time
@@ -115,14 +119,25 @@ def build_ledger(demo, script, anchors, write=True):
 
     lc, turns = script.get("launch", {}), script["turns"]
 
-    launch = []   # (slot, text, clip, dur)
-    if lc.get("intro"):
-        c, d = clip(lc["intro"], "open_intro"); launch.append(("intro", lc["intro"], c, d))
-    for k, f in enumerate(lc.get("flags", [])):
-        if f.get("say"):
-            c, d = clip(f["say"], f"open_flag{k}"); launch.append((f"flag{k}", f["say"], c, d))
-    if lc.get("outro"):
-        c, d = clip(lc["outro"], "open_outro"); launch.append(("outro", lc["outro"], c, d))
+    # NEW v6 path: the capture tape voice-paced the launch and recorded each
+    # beat's raw onset (`at`) + clip (`mp3`). REUSE those clips verbatim — do NOT
+    # re-synth — and place them at their captured onsets; the boot is then copied
+    # 1:1 (no freeze-extend), because the capture was already paced to the voice.
+    # FALLBACK path (no captured beats — the integration tests, dry runs): synth
+    # the launch from the script and freeze-extend the boot to host it (legacy).
+    captured_launch = anchors.get("launch_beats")
+    captured_outro = anchors.get("launch_outro")
+    use_captured = bool(captured_launch)
+
+    launch = []   # (slot, text, clip, dur) — fallback only
+    if not use_captured:
+        if lc.get("intro"):
+            c, d = clip(lc["intro"], "open_intro"); launch.append(("intro", lc["intro"], c, d))
+        for k, f in enumerate(lc.get("flags", [])):
+            if f.get("say"):
+                c, d = clip(f["say"], f"open_flag{k}"); launch.append((f"flag{k}", f["say"], c, d))
+        if lc.get("outro"):
+            c, d = clip(lc["outro"], "open_outro"); launch.append(("outro", lc["outro"], c, d))
 
     iv, tv, ov = [], [], []
     for i, t in enumerate(turns):
@@ -146,11 +161,20 @@ def build_ledger(demo, script, anchors, write=True):
         if s["kind"] == "hard":
             continue
         if s["kind"] == "boot":
-            # boot hosts the launch beats sequentially, then a trailing BREATH so
-            # the last launch voice clears before turn-0's intro. Freeze-extended
-            # only if the launch voice outlasts the captured animation.
-            launch_dur = seq_len([b[3] for b in launch])
-            s["out_dur"] = round(max(raw_len, launch_dur + BREATH if launch else 0.0), 3)
+            if use_captured:
+                # boot is copied 1:1 — the capture was paced to the launch voice,
+                # so NO freeze-extend for the launch. Only the outro may ride a
+                # touch past the boot's raw end; keep a SMALL freeze tail for that
+                # remainder (usually none — outro_end <= raw_len).
+                outro_end = ((captured_outro["at"] + captured_outro["dur"])
+                             if captured_outro else 0.0)
+                s["out_dur"] = round(max(raw_len, outro_end), 3)
+            else:
+                # boot hosts the launch beats sequentially, then a trailing BREATH
+                # so the last launch voice clears before turn-0's intro. Freeze-
+                # extended only if the launch voice outlasts the captured animation.
+                launch_dur = seq_len([b[3] for b in launch])
+                s["out_dur"] = round(max(raw_len, launch_dur + BREATH if launch else 0.0), 3)
         elif s.get("role") == "pre":
             i = s["turn_idx"]
             lead = BREATH if i >= 1 else 0.0          # clear the prev hard/think
@@ -190,12 +214,27 @@ def build_ledger(demo, script, anchors, write=True):
     def pt(x):                     # a tight (point) visual window
         return (x, x)
 
-    # ---- launch beats: sequential from the boot out-start -------------------
-    cur = boot["out"][0]
-    for slot, text, c, d in launch:
-        add("launch_flag", -1, text, c, cur, d, pt(cur + d), "lead", 1,
-            id_payload=f"{slot}:{text}")
-        cur += d + BREATH
+    # ---- launch beats -------------------------------------------------------
+    if use_captured:
+        # Reuse the captured clips; place each at its raw onset mapped through the
+        # boot. The boot is hard-copied 1:1, so output == raw: voice.start == at.
+        boff = boot["out"][0] - boot["raw"][0]      # boot raw->out shift (== 0)
+        for b in captured_launch:
+            at = round(boff + b["at"], 3)
+            add("launch_flag", -1, b.get("text", ""), b["mp3"], at, b["dur"],
+                pt(at + b["dur"]), "lead", 1,
+                id_payload=f'{b.get("token", "")}:{b.get("text", "")}')
+        if captured_outro:
+            at = round(boff + captured_outro["at"], 3)
+            add("launch_flag", -1, captured_outro.get("text", ""), captured_outro["mp3"],
+                at, captured_outro["dur"], pt(at + captured_outro["dur"]), "lead", 1,
+                id_payload=f'outro:{captured_outro.get("text", "")}')
+    else:
+        cur = boot["out"][0]
+        for slot, text, c, d in launch:
+            add("launch_flag", -1, text, c, cur, d, pt(cur + d), "lead", 1,
+                id_payload=f"{slot}:{text}")
+            cur += d + BREATH
 
     # ---- per-turn beats ----------------------------------------------------
     for i, t in enumerate(turns):
@@ -268,6 +307,12 @@ def main():
     with open(os.path.join(demo, "capture.json"), encoding="utf-8") as fh:
         plan = json.load(fh)
     anchors = detect_anchors.detect(demo, args.video, plan)
+    # thread the capture's voice-paced launch beats (if any) into the anchors so
+    # build_ledger reuses them instead of re-synthesizing + freeze-extending.
+    lp = plan.get("launch", {}) or {}
+    if lp.get("beats"):
+        anchors["launch_beats"] = lp["beats"]
+        anchors["launch_outro"] = lp.get("outro")
     with open(args.script, encoding="utf-8") as fh:
         script = json.load(fh)
     led = build_ledger(demo, script, anchors, write=True)
