@@ -87,7 +87,10 @@ cat > "$DEMO/.claude/settings.json" <<JSON
   "hooks": {
     "SessionStart":     [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"$SR/timelog.py\"" } ] } ],
     "UserPromptSubmit": [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"$SR/timelog.py\"" } ] } ],
-    "PreToolUse":       [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"$SR/timelog.py\"" } ] } ],
+    "PreToolUse":       [ { "matcher": "AskUserQuestion", "hooks": [
+                            { "type": "command", "command": "python3 \"$HERE/autoanswer_questions.py\"" },
+                            { "type": "command", "command": "python3 \"$SR/timelog.py\"" } ] },
+                          { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"$SR/timelog.py\"" } ] } ],
     "PostToolUse":      [ { "matcher": "*", "hooks": [ { "type": "command", "command": "python3 \"$SR/timelog.py\"" } ] } ],
     "Stop":             [ { "matcher": "*", "hooks": [
                             { "type": "command", "command": "python3 \"$SR/timelog.py\"" },
