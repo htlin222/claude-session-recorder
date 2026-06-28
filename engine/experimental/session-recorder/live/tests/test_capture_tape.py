@@ -79,9 +79,11 @@ def test_question_turn_waits_for_selector_then_navigates(tmp_path):
     }
     tape, plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
                           font_size=26, word_delay=220)
-    # after the prompt Enter: wait for the selector footer, then navigate, then sentinel
-    assert "↑/↓ to navigate" in tape           # Wait+Screen on the selector footer
-    i_wait = tape.index("↑/↓ to navigate")
+    # after the prompt Enter: wait for the selector footer (VHS-safe ASCII span),
+    # then navigate, then sentinel
+    assert f"/{qnav.FOOTER_RE}/" in tape        # Wait+Screen on the selector footer
+    assert "↑" not in tape                       # no Unicode arrows (VHS parser chokes)
+    i_wait = tape.index(qnav.FOOTER_RE)
     i_down = tape.index("Down", i_wait)         # qnav: answer_index 1 -> one Down + Enter
     i_done = tape.index("VHS_TURN_DONE_1")
     assert i_wait < i_down < i_done
@@ -96,5 +98,5 @@ def test_non_question_turn_has_no_selector_wait(tmp_path):
             "turns": [{"prompt": "just do it"}]}
     tape, _ = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
                        font_size=26, word_delay=220)
-    assert "↑/↓ to navigate" not in tape
+    assert qnav.FOOTER_RE not in tape
     assert 'VHS_QUESTION_MODE' not in tape

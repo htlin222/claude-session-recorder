@@ -180,10 +180,11 @@ def render(spec, demo, width, height, font_size, word_delay,
             # then dwell so the viewer reads it, then NAVIGATE to the chosen option
             # (Down/Up x delta) with a beat between keys so the highlight move is
             # visible and a beat before the final Enter selects. THEN fall through to
-            # the sentinel wait. The footer `↑/↓ to navigate` is escaped for the VHS
-            # regex as `↑\/↓ to navigate` (the bare `/` would close the /.../).
-            a(f"Wait+Screen@{turn_to}s /↑\\/↓ to navigate/   "
-              "# AskUserQuestion selector appeared (footer: ↑/↓ to navigate)")
+            # the sentinel wait. qnav.FOOTER_RE is a VHS-SAFE substring (`to
+            # navigate`): VHS's tape parser cannot handle a literal `/` (no `\/`
+            # escape) nor the Unicode arrows `↑↓` inside a Wait+Screen regex.
+            a(f"Wait+Screen@{turn_to}s /{qnav.FOOTER_RE}/   "
+              "# AskUserQuestion selector footer appeared")
             a(f"Sleep {QSEE:.3f}s   # dwell on the question (viewer reads it)")
             keys = qnav.keys_to_select(question["answer_index"], 0)
             for ki, key in enumerate(keys):

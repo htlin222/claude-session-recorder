@@ -7,8 +7,12 @@ shared by the VHS-scripted path (the tape emits the keys) and the tmux bg-monito
 so every driver matches the same patterns."""
 
 # the selector footer — unique to a LIVE AskUserQuestion selector (don't match
-# option words; those also appear in the echoed prompt before the selector paints)
-FOOTER_RE = r"↑/↓ to navigate"
+# option words; those also appear in the echoed prompt before the selector paints).
+# VHS-SAFE: this is emitted into a VHS `Wait+Screen /.../` AND used with Python
+# re.search on captured pane text. VHS's tape parser cannot handle a literal `/`
+# (no `\/` escape) nor Unicode arrows inside the regex, so we match a plain-ASCII
+# span of the footer ("Enter to select · ↑/↓ to navigate · Esc to cancel").
+FOOTER_RE = r"to navigate"
 # claude's post-selection confirmation line
 ANSWERED_RE = r"User answered Claude's questions"
 
