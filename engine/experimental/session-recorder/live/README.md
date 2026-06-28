@@ -1,276 +1,198 @@
-# live/ — film a real Claude Code session with VHS (Roadmap path #4)
+# claude-session-recorder
 
-The parent `session-recorder/` does **post-hoc** narration placed at raw event
-times — so the voice always *trails* the typing (sync-model v1's failure). This
-folder *films* the `claude` TUI with VHS and places a **voice-leads-typing**
-narration: you hear what each prompt will do BEFORE it's typed. Full rationale:
-`docs/plans/2026-06-27-claude-session-voiceover-sync-design.md`.
+**Record a narrated, sync-verified teaching video of a *real* Claude Code TUI
+session.** You write a short JSON script (the prompts + what to say); the tool
+films an actual `claude` session, lays an explainshell-style panel on the right,
+and dubs a voice that **leads** the typing — you hear *what a command will do*
+before it appears. The result is a 1920×1080 MP4 where the **left terminal, the
+right panel, and the voice are always in lock-step**, produced **deterministically**:
+`claude` runs **once**, then the static stretches of the recording are freeze-frame
+spliced to fit the authored narration. No re-takes, no drift. MIT licensed.
 
-Key idea — **hard axis vs soft slots**. claude's think gap (Enter→sentinel) is
-non-controllable; the pre-prompt pause, typing, and post-output hold are ours. So
-the intro voice lives in the pre-prompt slot (leads typing, deterministic), the
-outro in the post-output hold, and only the *think* voice must fit the real gap
-(loop-until-align). Anchors are read from the video's own pixels (the input line
-lights up while typing, clears on submit) — not tape arithmetic, which drifts.
+![A narrated Claude Code session: terminal on the left, explainshell-style panel on the right](assets/session_panel.gif)
 
-## Files (v6)
-| File | Role |
-| --- | --- |
-| `claude_sandbox.sh` | Stage an **isolated** Claude Code project: own `CLAUDE_CONFIG_DIR` (focus off, no dialogs, pinned model, credentials copied) + project hooks wiring `timelog.py` **and** the sentinel. |
-| `vhs_stop_sentinel.sh` | Stop hook printing the on-screen `VHS_TURN_DONE_N` marker VHS waits on (gated on `$VHS_DEMO`). |
-| `script.example.json` | The narration script: a `launch` block (the opening CLI lesson), per-turn `{prompt, intro, think, outro}`, and a `close`. |
-| `run_v6.sh` | **The driver.** `run_v6.sh <demo> <script.json>` runs the whole pipeline below, launching `claude` exactly once (in the vhs step). |
-| `ledger.py` | The single source of truth (`{beats, meta}`) + helpers (`beat_id`, `beat_start/end`, `serialization_violations`, `output_timeline`, `BREATH`). Every stage reads it; nobody re-derives a time it already holds. |
-| `gen_capture_tape.py` | `script.json` → a **prompts-only** minimal VHS tape (no voice) + `capture.json`. |
-| `detect_anchors.py` | Reused v5 `signals()` + peak-based `detect_turns()`: boot, per-turn `typing_start/submit/done`, soft-gap ranges, tool-event times — all in **raw-video time**. |
-| `author.py` | Phase 1: synth + measure voice, compute each beat's soft length, apply tiers, fill the ledger's soft fields + `drop` flags → every beat's final start/end is KNOWN. |
-| `splice.py` | Phase 2: ffmpeg freeze-frame re-time the soft segments of `terminal_raw.mp4` → `terminal.mp4`, and **reconcile** the ledger to the realized video (see below). |
-| `overlay.py` | Phase 2: mux the voice clips at the ledger's computed onsets over `terminal.mp4` → `session.mp4` + `.srt`. |
-| `panel.py` | Phase 2: build the explainshell-style right panel from the **same** ledger → `session_panel.mp4`. |
-| `lint.py` | Phase 3: deterministic gate — the serialization invariant + internal relations on the finalized ledger (`--filmstrip` extracts a labelled eyeball strip). Failures are authoring errors, not detection noise. |
+---
 
-## Pipeline (claude runs **once**)
+## Why this is hard
+
+Naively dubbing a screen recording desyncs immediately, for two reasons:
+
+1. **Claude's think gap is non-deterministic.** The time between "Enter" and the
+   answer drifts run-to-run (38s one take, 30s the next). A voice clip sized to one
+   take overruns the next, so the timeline you *design* against is never the one
+   that *airs*.
+2. **Independent stages disagree by a frame.** If the overlay and the panel each
+   re-derive per-turn timing from the video, they desync — the recurring
+   "terminal says one thing, panel says another" bug.
+
+**v6 fixes both.** It records `claude` exactly once, treats that take's *hard*
+segments (typing → submit → answer, the think gap, tool execution) as ground truth,
+and re-times only the *soft* segments (the static frames where nothing happens) with
+an ffmpeg freeze-frame splice — so the final timeline is computed, not detected. A
+single **`ledger.json`** is the one source of truth every stage reads, so
+terminal == panel == voice by construction. Full rationale:
+[`event-ledger-deterministic-pipeline-design.md`](../../../../docs/plans/2026-06-28-event-ledger-deterministic-pipeline-design.md)
+and the [sync-model evolution](../../../context/sync-model.md).
+
+---
+
+## Prerequisites
+
+- **macOS** (Apple Silicon supported). Capture is macOS-only.
+- **Python ≥ 3.10**
+- **External tools:**
+  ```bash
+  brew install vhs ffmpeg tmux imagemagick
+  pipx install edge-tts        # or: pipx install edge-tts; the package also pulls it as a dep
+  ```
+- **The Claude Code CLI** (`claude`) on your `PATH`.
+
+**Auth note:** filming runs `claude` inside an isolated sandbox with its own
+`CLAUDE_CONFIG_DIR`. On this machine auth is a file, so the sandbox **copies
+`~/.claude/.credentials.json`** into the throwaway config to skip login — it never
+touches your real config. Sandbox dirs hold real credentials, so keep demo
+directories in `/tmp` (ephemeral, gitignored); never commit one.
+
+---
+
+## Install
+
+From this package directory:
+
 ```bash
-SR=engine/experimental/session-recorder
-"$SR/live/run_v6.sh" /tmp/sess "$SR/live/script.example.json"
+pip install -e .[dev]
 ```
-The driver runs five phases; `claude` launches **only** in the vhs step:
 
-- **Phase 0 — capture.** Stage the sandbox (idempotent), generate a prompts-only
-  minimal tape (`gen_capture_tape.py`), then `vhs session.tape` films the real TUI
-  **once** → `terminal_raw.mp4` + `session-timeline.jsonl`. The driver exports `SR`
-  and `HERE` (the claude-spawned hooks reference `$SR/timelog.py` and
-  `$HERE/vhs_stop_sentinel.sh`) and scrubs the inherited prompt env (`PS1/PROMPT`,
-  `_P9K_*`) so VHS's bash doesn't dump the p10k prompt full-screen.
-- **Phase 1 — author** (`author.py`, runs detection in-process — no relaunch):
-  synth + measure each voice clip, compute each beat's required soft length, apply
-  the tiers, write the ledger's soft fields + `drop` flags. Every beat's final
-  start/end is now known.
-- **Phase 2 — splice/overlay/panel.** `splice.py` freeze-frame re-times the soft
-  segments → `terminal.mp4` and **reconciles** the ledger to the realized video;
-  `overlay.py` muxes the voice → `session.mp4` + `.srt`; `panel.py` builds the
-  right panel → `session_panel.mp4`. All three read the **same** reconciled ledger.
-- **Phase 3 — lint** (`lint.py --filmstrip`): the deterministic gate.
+This installs the deterministic core (`numpy`, `Pillow`, `edge-tts`, `pytest`) and
+puts the **`record-session`** command on your `PATH`.
 
-### The ledger (`ledger.json`) — single source of truth
-`{"beats": [...], "meta": {...}}`. A **beat** is the atomic unit
-(`narration-start / pane-switch → CLI input → execution → result`):
+---
 
-| field | meaning |
-| --- | --- |
-| `id` | `sha1(kind\|turn_idx\|payload)[:6]` — stable across re-authoring (a beat's identity survives editing its siblings). |
-| `kind` | `launch_flag` \| `intro` \| `think` \| `outro` \| `close`. |
-| `turn_idx` | which turn the beat belongs to. |
-| `tier` | `1` must-keep \| `2`/`3` droppable (see table). |
-| `mode` | `lead` (voice fully precedes the visual) \| `ride` (voice rides the hard visual `[visual.start, visual.end]`). |
-| `voice` | `{clip, start, end}` — synthesized clip + its placed window. |
-| `visual` | `{start, end}` — terminal action window (raw video time). |
-| `panel` | `{switch_at}` — pane content swap (= `voice.start`). A switch at literal `0.0` is panel init, not beat activity. |
-| `raw` | the beat's raw-video segment(s) before re-timing. |
-| `drop` | set true by author/lint when a Tier-2/3 beat can't fit. |
+## Quickstart
 
-`meta.segments` is the ordered cut list — each `{raw, out, out_dur}` (raw bound,
-output window, output duration); hard/boot segments copy verbatim, soft segments
-become a freeze held for `out_dur`. `meta.vtot_out` is the total output duration
-of `terminal.mp4`.
-
-### Priority tiers (what may be dropped)
-| Tier | beats | guaranteed by | when too short |
-| --- | --- | --- | --- |
-| **1 must-keep** | the lead spine — `intro`, each `launch_flag`, `outro`/`close` | soft slot → freeze-frame **stretched** (host-frozen) to fit the voice | impossible → **never dropped** |
-| **2 droppable** | `think` (rides the hard `[submit,done]` gap) | trimmed to fit the measured gap | trim at clause boundary; if the first clause still overruns → **drop** |
-
-The spine is "the explanation before each command" — a *structural* guarantee in
-v6 (stretch the static frame), not a hope.
-
-### The one invariant
+```bash
+record-session /tmp/demo script.example.json
+# → /tmp/demo/session_panel.mp4   (1920×1080, terminal + panel + voice + .srt)
 ```
-beat[i].end + BREATH ≤ beat[i+1].start
+
+`record-session <demo-dir> <script.json>` runs the whole pipeline, launching
+`claude` exactly once. Three example tiers:
+
+```bash
+# 1) A basic Claude demo — write + test a FizzBuzz function
+record-session /tmp/fizz   script.example.json
+
+# 2) The Apple `container` demo — spin up a Linux micro-env on macOS
+record-session /tmp/box    script.container.json
+
+# 3) An interactive AskUserQuestion demo, answered live (robust path)
+record-session /tmp/ask    script.robust.json --robust --answers '{"*":1}'
+```
+
+The standard path films a plain `claude` session. `--robust` films inside an
+invisible **tmux** with a background monitor that answers Claude's
+**AskUserQuestion** selector *on screen* (see [below](#interactive-askuserquestion)).
+
+---
+
+## How it works
+
+`claude` runs **once**, in the capture pass; everything after is deterministic
+editing of that single take. Each module reads (and only writes its own slice of)
+the shared `ledger.json`.
+
+| Stage | Module | What it does (one line) |
+| --- | --- | --- |
+| **0 Capture** | `gen_capture_tape.py` | Stage the isolated sandbox, emit a prompts-only minimal VHS tape, film the real TUI once → `terminal_raw.mp4` + timeline. |
+| **1 Detect** | `detect_anchors.py` | Read the video's own pixels (peak-based) for boot + per-turn `typing_start / submit / done` + tool times → the ledger's **hard** fields. |
+| **2 Author** | `author.py` | Synthesize + measure the voice clips, compute each beat's soft length, apply priority tiers → the ledger's **soft** fields + `drop` flags. Every beat's final start/end is now known. |
+| **3 Splice** | `splice.py` | ffmpeg freeze-frame re-times the soft segments → `terminal.mp4`, and **reconciles** the ledger to the realized frames. |
+| **4 Overlay + Panel** | `overlay.py`, `panel.py` | Mux the voice at the ledger's onsets → `session.mp4` + `.srt`; build the explainshell-style panel from the **same** ledger → `session_panel.mp4`. |
+| **5 Lint** | `lint.py` | Deterministic gate: the serialization invariant + internal relations on the finalized ledger (`--filmstrip` extracts a labelled eyeball strip). Failures are authoring errors, not detection noise. |
+
+**The one invariant** every stage upholds:
+
+```
+beat[i].end + BREATH ≤ beat[i+1].start        (BREATH = 0.5s)
 where beat.end = max(voice.end, visual.end, panel activity end)
 ```
-Every channel of a beat quiesces (with a `BREATH = 0.5s` of silence) before the
-next beat starts. Cross-beat overlap is forbidden; cross-channel overlap is
-contained inside a beat. This single rule subsumes v5's separate
-min-gap / no-overlap / outro-vs-next-intro checks (`serialization_violations`).
 
-### splice RECONCILES the ledger
-Freeze-frame re-timing produces slightly different realized durations than the
-plan. `splice.py` measures the realized `terminal.mp4` and rewrites the ledger's
-segment `out`/`out_dur`/`vtot_out` (and the dependent beat times) so that **every
-downstream stage reads numbers that match the frames** — `overlay.py`'s voice mux,
-`session.srt`, and `panel.py`'s keyframes are all driven off the same reconciled
-ledger. No re-record.
+Each beat (narration-start → CLI input → execution → result) fully quiesces before
+the next begins. **Tier 1** beats (the explanation *before* each command) are
+guaranteed — their static frame is stretched to fit the voice, never dropped.
+**Tier 2** beats (the `think` voice that rides the hard gap) are trimmed at a clause
+boundary or dropped if they can't fit. Design + plan:
+[design](../../../../docs/plans/2026-06-28-event-ledger-deterministic-pipeline-design.md),
+[implementation plan](../../../../docs/plans/2026-06-28-event-ledger-deterministic-pipeline-plan.md).
 
-### v5 retired
-The v5 files (`gen_session_tape.py`, `session_overlay.py`, `session_panel.py`,
-`verify_session.py`, `validate_sync.py`) have been **removed** — v6 passed the
-end-to-end validation (lint PASS, `claude` launched once, left-terminal ==
-right-panel == narration confirmed on the file-writing + text-Q&A + mixed
-scenario in `script.mixed.json`). v6's `detect_anchors.py` carries a verbatim copy
-of v5's `signals()`/`detect_turns()`, so nothing of the detection was lost.
+---
 
-## Handling AskUserQuestion (interactive clarifications)
-`AskUserQuestion` is an **interactive-TUI-only** tool — it does not exist under
-`claude -p`. If the inner claude calls it mid-recording, the selector renders and
-**blocks waiting for a human**: the tape's `Wait+Screen /VHS_TURN_DONE_N/` times
-out, the Stop sentinel never prints, and the recording fails. These modules make a
-recorded session survive (and optionally *show*) the clarification.
+## Interactive AskUserQuestion
 
-### Three approaches
-| Approach | What happens on screen | Drives | Use when |
+`AskUserQuestion` is an **interactive-TUI-only** tool — it doesn't exist under
+`claude -p`. If the inner `claude` calls it mid-recording, the selector renders and
+**blocks waiting for a human**, the sentinel never prints, and the recording hangs.
+These modules let a recorded session *survive* (and optionally *show*) the
+clarification.
+
+![Claude asks a multi-question AskUserQuestion; a background monitor answers it on screen](assets/askuserquestion.gif)
+
+| Mode | What's on screen | How | Use when |
 | --- | --- | --- | --- |
-| **`auto` (deny+answer)** — default, INVISIBLE, hang-proof | nothing; no selector ever paints | `autoanswer_questions.py` **denies** the tool at PreToolUse and feeds the chosen answer back as the deny *reason* → claude continues as if answered | you just need the recording not to hang and don't want to teach the ask |
-| **scripted-visible** (VHS-scripted) | the selector renders and the **tape** navigates `Down×N + Enter` | `gen_capture_tape.py` `question` beats + `autoanswer_questions.py` in `render` mode | the question is **known** ahead of time and you want the exact VHS visual of the ask + answer |
-| **robust** (tmux + bg-monitor) | the selector renders and `qmonitor.py` answers it live | `run_v6_tmux.sh`: claude runs inside an invisible tmux; `qmonitor.py` reads the live selector and answers **any** question (incl. unscripted + multi-question) | the question is **unknown** / unscripted, or multi-question — still a real VHS visual |
+| **auto** (default) | nothing — no selector ever paints | `autoanswer_questions.py` **denies** the tool at PreToolUse and feeds the chosen answer back as the deny *reason*, so `claude` continues as if answered | you just need the recording not to hang |
+| **scripted-visible** | the selector renders; the **VHS tape** navigates `Down×N + Enter` | a `question` beat in the script + `autoanswer_questions.py` in `render` mode | the question is **known** ahead and you want the exact visual |
+| **robust** (`--robust`) | the selector renders; `qmonitor.py` answers it live | `claude` runs inside an invisible tmux; the background monitor reads the live selector and answers **any** question (incl. unscripted + multi-question) | the question is **unknown** / unscripted, or multi-question |
 
-Why deny-and-reason for `auto`: Claude Code hooks cannot inject a synthetic tool
-*result* at PreToolUse (only PostToolUse has `updatedToolOutput`, which fires too
-late). Denying with the answer in the reason is the only PreToolUse lever, and it
-keeps the selector off-screen entirely.
+Why deny-and-reason for `auto`: Claude Code hooks can't inject a synthetic tool
+*result* at PreToolUse, so denying with the answer in the reason is the only lever
+that keeps the selector off-screen.
 
-### The hook — `autoanswer_questions.py`
-A **PreToolUse** hook wired on the `AskUserQuestion` matcher (see
-`claude_sandbox.sh`, which seeds `.claude/settings.json` with this hook *and*
-`timelog.py` on that matcher). Two modes via `$VHS_QUESTION_MODE`:
+**Env knobs:**
 
-- **`auto`** (default): emit a PreToolUse **deny** whose reason states the picked
-  answers (`"… Auto-answered on the user's behalf: <header> -> <label>; …"`).
-  Writes no signal file. Invisible, never hangs.
-- **`render`**: emit a PreToolUse **allow** so the selector paints, and write
-  `pending_q.json` into `$VHS_SIGNAL_DIR` describing **all** questions (header,
-  question, option labels, `target_index`, `target_label`, `multiSelect`) so an
-  external driver can answer them on screen.
-
-Answer choice is `target_index_for()`: an override is looked up by the question's
-`header`, then its `question` text, then the catch-all `"*"`; the override value
-is either an **int** / digit-string (that option *index* — wraps on negatives) or
-a **string** (exact label match, else case-insensitive substring). Falls back to
-option 0 (the first).
-
-### Config (env)
 | Var | Values | Effect |
 | --- | --- | --- |
-| `$VHS_QUESTION_MODE` | `auto` (default) \| `render` | deny+answer vs. allow+signal |
-| `$VHS_ANSWERS` | JSON object | per-question override: `header` / question-text / `"*"` → choice, where choice is an option **index** (int) or a **label substring** (string). E.g. `{"*":1}` forces the **2nd** option everywhere; `{"Auth method":"OAuth"}` picks by label. |
-| `$VHS_SIGNAL_DIR` | dir path | where `render` mode writes `pending_q.json` (defaults to cwd) |
+| `VHS_QUESTION_MODE` | `auto` (default) \| `render` | deny+answer vs. allow+signal |
+| `VHS_ANSWERS` | JSON object | per-question override: `header` / question-text / `"*"` → an option **index** (int) or a **label substring** (string). E.g. `{"*":1}` forces the 2nd option everywhere; `{"Auth method":"OAuth"}` picks by label. (`--answers` is a passthrough for this.) |
+| `VHS_SIGNAL_DIR` | dir path | where `render` mode writes `pending_q.json` (defaults to cwd) |
 
-The `gen_capture_tape.py` `--tmux` path emits `Env VHS_QUESTION_MODE "render"`
-into the tape automatically when any turn has a `question` beat; `run_v6_tmux.sh`
-passes `VHS_QUESTION_MODE=render` + `VHS_ANSWERS` through the **real process env**
-when launching `vhs` (a VHS tape `Env` line can't escape the quotes in `{"*":0}`).
+Answer choice resolves by the question's `header`, then its text, then the catch-all
+`"*"`; an int is the option *index*, a string is an exact-then-substring label match.
+Falls back to the first option.
 
-A `question` beat in `script.json` (scripted-visible path):
-```json
-"turns": [ { "prompt": "…", "intro": "…", "think": "…", "outro": "…",
-             "question": { "answer_index": 1 } } ]
-```
-`answer_index` is **0-based** into the model's own options. The tape then emits
-`Wait+Screen /to navigate/` (the selector footer), a dwell, then `Down×N + Enter`.
+---
 
-### The selector UI (from the spike)
-The live footer is `Enter to select · ↑/↓ to navigate · Esc to cancel`. Detection
-matches the plain-ASCII substring **`to navigate`** (`qnav.FOOTER_RE`) — the
-footer is the only VHS-safe anchor, because VHS's tape parser can't handle a
-literal `/` (no `\/` escape) nor the Unicode arrows `↑↓` inside a `Wait+Screen`
-regex. The highlighted row is led by `❯`, the header line by `☐`; claude always
-appends two synthetic rows (`Type something.`, `Chat about this`) which
-`qparse.py` excludes. A **multi-question** AskUserQuestion shows one `☐/☒` tab per
-question plus a `✔ Submit` tab and **auto-advances** to the next tab on each
-answer-`Enter`, so N questions = `Enter × (N+1)` for defaults (the trailing Enter
-hits Submit). A single question has no Submit tab — its answer-Enter closes it.
+## Examples
 
-`qmonitor.py` (`--socket` for a dedicated tmux server) computes the whole
-keystroke plan up front from `pending_q.json` (`plan_keystrokes`): `Down×target +
-Enter` per question, plus one trailing Enter to Submit when there's more than one.
-It waits for `FOOTER_RE` before sending and for `ANSWERED_RE`
-(`User answered Claude's questions`) after. `qparse.parse_selector()` reconciles
-the target by **label** against the on-screen order (robust to reordering).
-
-### Known limitation
-`multiSelect` questions are answered as a **single pick** — the `Space`-toggle of
-multiple options is **not yet implemented**. Both `qmonitor.plan_keystrokes` and
-the render-mode signal treat a `multiSelect` target as one `Down×target + Enter`.
-Tracked as a `TODO` in `qmonitor.py`.
-
-### Scenario scripts & how to run
-| Script | Path | Run with |
+| Script | Demonstrates | Run with |
 | --- | --- | --- |
-| `script.question.json` | scripted-visible (known single question) | `run_v6.sh <demo> script.question.json` |
-| `script.robust.json` | robust (unscripted single question) | `run_v6_tmux.sh <demo> script.robust.json` |
-| `script.robust.multi.json` | robust (unscripted multi-question) | `run_v6_tmux.sh <demo> script.robust.multi.json` |
+| `script.example.json` | basic Claude session: write + test a FizzBuzz function | `record-session <dir> script.example.json` |
+| `script.mixed.json` | mixed turn types — file write, pure-text concept Q&A, edit + test | `record-session <dir> script.mixed.json` |
+| `script.container.json` | Claude driving Apple's `container` CLI (Linux micro-env on macOS) | `record-session <dir> script.container.json` |
+| `script.question.json` | scripted-visible AskUserQuestion: the tape answers a **known** single question on screen | `record-session <dir> script.question.json` |
+| `script.robust.json` | robust AskUserQuestion: a background monitor answers an **unscripted** single question | `record-session <dir> script.robust.json --robust` |
+| `script.robust.multi.json` | robust **multi-question** AskUserQuestion: the monitor answers every tab and submits | `record-session <dir> script.robust.multi.json --robust` |
 
-`run_v6.sh` reaches `render` mode through the tape's auto-emitted
-`Env VHS_QUESTION_MODE "render"` (because the turn has a `question` beat) and the
-tape itself drives the keys. `run_v6_tmux.sh` films claude inside an invisible
-status-off tmux on a dedicated socket (`-L vhsq`) with a background `qmonitor.py`
-answering whatever appears; everything after capture is identical to `run_v6.sh`.
+A script bundles a `launch` block (the opening CLI lesson — `claude` is typed
+flag-by-flag, each flag narrated *first*, then the token appears), per-turn
+`{prompt, intro, think, outro}`, and a `close`. What's narrated is exactly what's
+typed and run.
 
-## How detection survives response-heavy multi-turn sessions
-Naively thresholding the input band breaks when a session has several file-writing
-turns: response output lingers in the band and a turn's typing merges with the
-previous turn's response, so a turn gets missed. The fix (stress-tested on a
-3-turn file-writing session): a SUBMIT is a sharp PEAK — typing fills the input
-box to near its global max, then Enter clears it; lingering response content only
-sits MODERATELY bright. So `detect_turns` takes the contiguous runs where the
-(tight, auto-located) band exceeds HALF its max — exactly the N submissions —
-and derives `typing_start` from the tape's known typing duration. `done` is the
-last full-frame content jump before the next submit (absorbs long think gaps).
-Validated across text-Q&A, single-tool, and 3-turn file-writing recordings. This
-logic lives verbatim in `detect_anchors.py` now; run `lint.py --demo <demo>`
-(the deterministic gate) on anything new.
+---
 
-## The opening is a CLI lesson
-The `launch` block treats starting `claude` like the repo's rsync/jq lessons:
-the command is built **flag-by-flag**, and **the voice leads — each flag is
-narrated FIRST, then the token appears** (the tape runs `Sleep(say) ->
-Type(token) -> Sleep(breath)`). Since typing is instant, a token must not show
-until it's been explained; never type-then-narrate. This is the core principle
-in `docs/plans/2026-06-27-claude-session-voiceover-sync-design.md` and applies to
-any instant output (command/flag/one-shot token), not just `claude`. What's
-narrated is exactly what's typed and run (`base` + each flag's `arg`). Example:
-```json
-"launch": {
-  "base": "claude",
-  "flags": [
-    {"arg": "--model opus", "say": "加上 model opus 指定模型，"},
-    {"arg": "--permission-mode bypassPermissions", "say": "再用 permission mode bypass，讓示範自動執行、不問權限。"}
-  ],
-  "intro": "我們用 claude 啟動，", "outro": "稍候就進入互動畫面。"
-}
-```
-The open clip is placed at the deterministic `prelude` (the launch is the FIRST
-thing in the tape, so no detection needed); it leads the typing and plays through
-boot into the entry screen. Keep `bypassPermissions`/`--dangerously-skip-permissions`
-in the launch — the recording needs it (the sandbox pre-accepts the mode).
+## Limitations / status
 
-## Why the sandbox is non-negotiable (hard-won)
-Filming `claude` with your **normal** config fails in four ways — the sandbox
-fixes all four:
+- **Experimental.** This is the `live/` capture path of the broader
+  session-recorder; APIs and file layout may change.
+- **`multiSelect` is answered as a single pick.** The `Space`-toggle of multiple
+  options is not yet implemented (TODO in `qmonitor.py`); a `multiSelect` target is
+  treated as one `Down×target + Enter`.
+- **The live capture is non-deterministic.** The *editing* is deterministic, but the
+  one `claude` run can flake (model unavailability, an unexpected tool call) — if a
+  take fails, re-run. The post-capture pipeline never re-runs `claude`.
+- **macOS-only capture** (VHS + the sandbox assume macOS / Apple Silicon).
 
-1. **Focus mode hides the sentinel.** The `VHS_TURN_DONE_N` marker is a hook
-   `systemMessage`, and **focus mode hides system/hook messages** → the marker
-   never renders → every `Wait+Screen /sentinel/` times out. This was the first
-   and most confusing failure. A fresh `CLAUDE_CONFIG_DIR` starts with focus
-   **off**, so the marker shows. **Never record live without the sandbox.**
-2. **Chrome-extension dialog** ("Claude in Chrome extension detected") blocks
-   startup. There is **no** documented `settings.json` key to disable it — the
-   sandbox seeds `cachedChromeExtensionInstalled:false` in the isolated
-   `.claude.json` so it's never detected.
-3. **Unavailable-model banner.** A fresh config defaults to a model that may be
-   unavailable, painting a banner over the UI → sandbox pins `model:opus`.
-4. **`acceptEdits` isn't enough.** A turn that runs the test it just wrote hits a
-   **Bash** permission prompt and hangs. The tape launches with
-   `--dangerously-skip-permissions` (safe in a throwaway dir); the sandbox
-   pre-accepts the bypass-mode warning (`skipDangerousModePermissionPrompt`).
+---
 
-Plus: isolation drops MCP-auth warnings and your global `CLAUDE.md` from the
-frame, leaving a Catppuccin-clean capture.
+## License
 
-## Notes
-- Auth on this machine is a **file** (`~/.claude/.credentials.json`), not the
-  keychain, so the sandbox copies it in to skip login. Override the source with
-  `CLAUDE_CONFIG_DIR_GLOBAL`, the model with `SANDBOX_MODEL`.
-- `<demo>/.cfg/` holds real credentials → keep demo dirs in `/tmp` (gitignored,
-  ephemeral); never commit a sandbox.
-- The sentinel counter lives at `$TMPDIR/vhs-session-<sid>.count`; `cleanup` it
-  between takes so numbering restarts at `_1`.
+MIT — see [LICENSE](./LICENSE).
