@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# superseded by record.py (record-session CLI); kept for reference.
 # run_v6_tmux.sh — the v6 pipeline, but claude is filmed INSIDE a dedicated-socket
 # tmux that VHS renders, while a BACKGROUND qmonitor.py answers ANY on-screen
 # AskUserQuestion (a robustness safety net for UNKNOWN questions, keeping the VHS
