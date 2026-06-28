@@ -8,7 +8,7 @@
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
 ![Tests](https://img.shields.io/badge/tests-98%20passing-brightgreen.svg)
 
-![Demo: Claude runs Apple's container CLI in a micro Linux env — terminal + panel + narration](engine/experimental/session-recorder/live/assets/demo.gif)
+![Demo: the opening is a CLI lesson — `claude` is built flag-by-flag while the right panel dissects each flag with a colour-coded note](engine/experimental/session-recorder/live/assets/demo.gif)
 
 Films a real `claude` TUI session **once**, then freeze-frame splices the static
 stretches to fit an authored voice that **leads** the typing — a deterministic

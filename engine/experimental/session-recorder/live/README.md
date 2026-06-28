@@ -15,9 +15,9 @@ right panel, and the voice are always in lock-step**, produced **deterministical
 `claude` runs **once**, then the static stretches of the recording are freeze-frame
 spliced to fit the authored narration. No re-takes, no drift. MIT licensed.
 
-![Demo: Claude runs Apple's `container` CLI in a micro Linux env — terminal on the left, explainshell-style panel on the right, narration leading the action](assets/demo.gif)
+![Demo: the opening is a CLI lesson — `claude` is built flag-by-flag while the right panel dissects each flag with a colour-coded note](assets/demo.gif)
 
-<sub>▶ **[Watch the clip (MP4)](assets/demo.mp4)** · a slice of the Apple-`container` demo (`script.container.json`). Another example — a mixed Claude session below.</sub>
+<sub>▶ **[Watch the full clip (MP4)](assets/demo.mp4)** — the launch lesson into Claude running Apple's `container` CLI (`script.container.json`). A mixed Claude session is shown below.</sub>
 
 ![A narrated Claude Code session: terminal on the left, explainshell-style panel on the right](assets/session_panel.gif)
 
