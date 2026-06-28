@@ -1,0 +1,33 @@
+{
+  "_comment": "End-to-end workflow test: a claude session that demos Apple's `container` CLI (https://github.com/apple/container) — spinning up a micro Linux environment on macOS and running basic shell commands inside it. Alpine is pre-pulled and `container run` is ~2.5s, so each turn is fast + deterministic. Runs via the normal v6 pipeline (run_v6.sh); the inner claude executes the container commands with bypassPermissions.",
+  "launch": {
+    "base": "claude",
+    "flags": [
+      {"arg": "--model opus", "say": "指定 model 為 opus。", "note": "選用 Opus 模型。"},
+      {"arg": "--permission-mode bypassPermissions", "say": "權限模式設成 bypass，讓它自動執行指令。", "note": "略過權限詢問。"}
+    ],
+    "intro": "我們用 claude 啟動，接著請它玩 Apple 的 container。",
+    "outro": "稍候就進入互動畫面。"
+  },
+  "close": "用 Apple container，在 macOS 上幾秒就起一個乾淨的 Linux 微環境，基本指令都能直接跑。",
+  "turns": [
+    {
+      "prompt": "Use Apple's `container` CLI to run a one-off Alpine Linux container that prints the kernel version and the OS name, so we can see the micro Linux environment it spins up on macOS. Run: container run --rm alpine sh -c 'uname -srm; cat /etc/os-release | head -2'",
+      "intro": "先請它用 container 起一個 Alpine 容器，印出核心版本和系統名稱。",
+      "think": "它在跑 container run，幾秒內就把一個 Linux 微環境拉起來執行指令。",
+      "outro": "微環境起來了，回報的是 Linux aarch64、Alpine Linux —— 真的在容器裡跑。"
+    },
+    {
+      "prompt": "Now run an Alpine container that does basic shell work inside the micro environment: create a file with echo, list the directory, then read the file back. Run: container run --rm alpine sh -c 'echo \"hello from a micro container\" > /tmp/note.txt && ls -l /tmp && cat /tmp/note.txt'",
+      "intro": "接著在微環境裡跑幾個基本指令：寫檔、列目錄、再讀回來。",
+      "think": "它在容器裡用 echo 寫檔、ls 看目錄、cat 讀回內容。",
+      "outro": "基本的 echo、ls、cat 在這個 Linux 微環境裡都正常運作。"
+    },
+    {
+      "prompt": "Finally, show which container images are available locally using Apple's container CLI. Run: container image list",
+      "intro": "最後請它列出本機目前有哪些容器映像。",
+      "think": "它跑 container image list，把本機快取的映像列出來。",
+      "outro": "本機已經有 alpine、nginx、postgres 等映像，要起哪個環境都很快。"
+    }
+  ]
+}
