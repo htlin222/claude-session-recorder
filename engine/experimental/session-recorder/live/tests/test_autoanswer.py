@@ -1,3 +1,6 @@
+import json
+import os
+
 import autoanswer_questions as aq
 
 Q = {"questions": [{"question": "Which language?", "header": "Language",
@@ -36,3 +39,37 @@ def test_no_questions_denies_with_assume_message():
     payload = aq.deny_payload([])
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "assumption" in payload["hookSpecificOutput"]["permissionDecisionReason"].lower()
+
+
+def test_target_index_default_is_first_option():
+    assert aq.target_index_for(Q["questions"][0], {}) == 0
+
+
+def test_target_index_override_by_index():
+    assert aq.target_index_for(Q["questions"][0], {"*": 1}) == 1
+
+
+def test_render_mode_allows_and_writes_signal(tmp_path):
+    data = {"tool_input": {"questions": Q["questions"]}}
+    out = aq.handle(data, answers={}, mode="render", signal_dir=str(tmp_path))
+    # render mode must NOT deny (so the selector renders on screen)
+    assert out is None or out.get("hookSpecificOutput", {}).get("permissionDecision") != "deny"
+    sig = tmp_path / "pending_q.json"
+    assert sig.exists()
+    rec = json.loads(sig.read_text())
+    assert rec["options"] == ["Python (hello.py)", "Bash (hello.sh)"]
+    assert rec["target_index"] == 0
+    assert rec["target_label"] == "Python (hello.py)"
+
+
+def test_render_mode_target_override(tmp_path):
+    data = {"tool_input": {"questions": Q["questions"]}}
+    aq.handle(data, answers={"*": 1}, mode="render", signal_dir=str(tmp_path))
+    rec = json.loads((tmp_path / "pending_q.json").read_text())
+    assert rec["target_index"] == 1 and rec["target_label"] == "Bash (hello.sh)"
+
+
+def test_auto_mode_handle_denies(tmp_path):
+    out = aq.handle({"tool_input": {"questions": Q["questions"]}}, answers={}, mode="auto", signal_dir=str(tmp_path))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert not (tmp_path / "pending_q.json").exists()

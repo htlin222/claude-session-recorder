@@ -34,15 +34,15 @@ import os
 import sys
 
 
-def _pick(question, answers):
-    """Choose an option label for one question. An override is looked up by the
-    question's `header`, then its `question` text, then the catch-all key "*".
-    The override value may be:
-      * an int (or digit string) -> pick that option INDEX (force a non-default
-        without knowing the labels — robust for demos), or
+def target_index_for(question, answers):
+    """Return the 0-based index into the question's options chosen by the
+    override logic. An override is looked up by the question's `header`, then its
+    `question` text, then the catch-all key "*". The override value may be:
+      * an int (or digit string) -> that option INDEX (force a non-default
+        without knowing the labels — robust for demos; negatives wrap), or
       * a string -> the option whose label equals it, else contains it
         (case-insensitive substring), else ignored.
-    Falls back to the first option."""
+    Falls back to 0 (the first option). Returns None when there are no options."""
     opts = question.get("options") or []
     labels = [o.get("label", "") for o in opts if o.get("label")]
     if not labels:
@@ -54,15 +54,29 @@ def _pick(question, answers):
         if isinstance(override, int) or (isinstance(override, str) and override.lstrip("-").isdigit()):
             idx = int(override)
             if -len(labels) <= idx < len(labels):
-                return labels[idx]
+                return idx % len(labels)
         elif isinstance(override, str):
-            for lab in labels:
+            for i, lab in enumerate(labels):
                 if lab == override:
-                    return lab
-            for lab in labels:
+                    return i
+            for i, lab in enumerate(labels):
                 if override.lower() in lab.lower():
-                    return lab
-    return labels[0]
+                    return i
+    return 0
+
+
+def _labels(question):
+    """The non-empty option labels for a question, in order."""
+    return [o.get("label", "") for o in (question.get("options") or []) if o.get("label")]
+
+
+def _pick(question, answers):
+    """Choose an option label for one question. Thin wrapper over
+    target_index_for so the index and label logic never drift."""
+    labels = _labels(question)
+    if not labels:
+        return None
+    return labels[target_index_for(question, answers)]
 
 
 def choose_answers(tool_input, answers):
@@ -94,18 +108,64 @@ def deny_payload(chosen):
     }}
 
 
+def allow_payload():
+    """A PreToolUse allow so the AskUserQuestion selector renders on screen and an
+    external driver answers it (render mode)."""
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+    }}
+
+
+def handle(data, answers, mode, signal_dir):
+    """Dispatch on mode.
+
+    `auto`   -> DENY carrying the chosen answers (recording proceeds invisibly,
+                never hangs). Writes NO signal file.
+    `render` -> ALLOW (so the selector renders) and write a `pending_q.json`
+                signal under signal_dir describing the FIRST question + options +
+                the chosen target, so an external driver can pick it on screen.
+    """
+    tool_input = data.get("tool_input", {}) or {}
+    questions = tool_input.get("questions", []) or []
+    if mode == "render":
+        if questions:
+            q = questions[0]
+            labels = _labels(q)
+            ti = target_index_for(q, answers) or 0
+            rec = {
+                "header": q.get("header", ""),
+                "question": q.get("question", ""),
+                "options": labels,
+                "target_index": ti,
+                "target_label": labels[ti] if labels else None,
+                "multiSelect": q.get("multiSelect", False),
+            }
+            os.makedirs(signal_dir, exist_ok=True)
+            with open(os.path.join(signal_dir, "pending_q.json"), "w") as f:
+                json.dump(rec, f)
+        return allow_payload()
+    # auto (default)
+    chosen = choose_answers(tool_input, answers)
+    return deny_payload(chosen)
+
+
 def main():
     try:
         data = json.load(sys.stdin)
     except Exception:
         data = {}
-    tool_input = data.get("tool_input", {}) or {}
     try:
         answers = json.loads(os.environ.get("VHS_ANSWERS", "") or "{}")
     except Exception:
         answers = {}
-    chosen = choose_answers(tool_input, answers if isinstance(answers, dict) else {})
-    json.dump(deny_payload(chosen), sys.stdout)
+    if not isinstance(answers, dict):
+        answers = {}
+    mode = os.environ.get("VHS_QUESTION_MODE", "auto")
+    signal_dir = os.environ.get("VHS_SIGNAL_DIR") or os.getcwd()
+    out = handle(data, answers, mode, signal_dir)
+    if out is not None:
+        json.dump(out, sys.stdout)
     sys.exit(0)
 
 
