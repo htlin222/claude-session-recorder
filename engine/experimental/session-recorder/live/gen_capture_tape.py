@@ -39,6 +39,9 @@ import qnav
 
 THEMES = {"dark": "Catppuccin Mocha", "light": "Catppuccin Latte"}
 PAD = 0.4          # fixed tiny soft pad around each action (no voice sizing)
+DONE_HOLD = 3.0    # hold after each turn's Stop sentinel so the SETTLED result is
+                   # captured stable (else detection/tail-freeze land on the still-
+                   # running frame and the ending freezes mid-execution)
 PRELUDE = 2.0      # Sleep before the launch typing (shell prompt settles)
 PRE_ENTER = 0.4    # beat after typing finishes, before Enter
 LBREATH = 0.5      # breath after each voice-paced launch token (== ledger BREATH)
@@ -216,7 +219,13 @@ def render(spec, demo, width, height, font_size, word_delay,
                 a(key)
             turn_plan["question"] = {"answer_index": question["answer_index"]}
         a(f"Wait+Screen@{turn_to}s /VHS_TURN_DONE_{i}/   # HARD axis: real think gap")
-        a(f"Sleep {PAD:.3f}s   # settle pad")
+        # HOLD on the COMPLETED frame after the Stop sentinel prints, so the
+        # finished result (claude's final message + the `VHS_TURN_DONE` line) is
+        # captured STABLE. Without this the tape tore down ~0.4s after the
+        # sentinel, so `done` detection + the tail freeze landed on the still-
+        # running frame BEFORE the result settled — the video then froze on a
+        # "Running… / Drizzling" frame instead of the result.
+        a(f"Sleep {DONE_HOLD:.3f}s   # hold on the settled result + sentinel")
         a("")
         plan["turns"].append(turn_plan)
     # teardown
