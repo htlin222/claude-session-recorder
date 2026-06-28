@@ -170,6 +170,13 @@ def _seg_file(video, op, idx, outdir, w, h, fps=FPS):
     # freeze: choose the source frame to hold
     if op.get("at") == "end":
         src = round(op["raw"][1] - 1.0 / fps, 3)        # boot's last static frame
+    elif op.get("freeze_from") == "start":
+        # tail: its own raw range is just the Ctrl+C teardown into a blank shell —
+        # the settled RESULT is the last frame of the PRECEDING hard segment, i.e.
+        # the ~1.5s JUST BEFORE the tail starts (tail.raw[0] == hard.raw[1]). Source
+        # the result there, not from inside the (blank) tail.
+        a = op["raw"][0]
+        src = _calm_time(video, max(0.0, a - 1.5), a)
     else:
         src = _calm_time(video, op["raw"][0], op["raw"][1])
     png = os.path.join(outdir, f"frame_{idx:03d}.png")

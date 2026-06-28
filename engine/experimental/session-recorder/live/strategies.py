@@ -49,14 +49,23 @@ class BootStrategy(SegmentStrategy):
 
 class SoftStrategy(SegmentStrategy):
     """A static idle region (post-boot, between turns, tail). Replace with a
-    single-frame freeze held for the authored out_dur (stretch OR trim)."""
+    single-frame freeze held for the authored out_dur (stretch OR trim).
+
+    The TAIL is special: its raw range runs from the last turn's `done` THROUGH
+    the Ctrl+C teardown into the post-exit blank shell. The globally-calmest frame
+    there is the blank shell (more static than the result), so a naive freeze ends
+    the video on a blank screen while the outro/close narrate. Mark the tail to
+    freeze from the START (the settled RESULT, before teardown) instead."""
     kind = "soft"
     verbatim = False
 
     def splice_ops(self, seg):
         raw_len = seg["raw"][1] - seg["raw"][0]
-        return [{"op": "freeze", "raw": list(seg["raw"]),
-                 "out_dur": round(seg.get("out_dur", raw_len), 3)}]
+        op = {"op": "freeze", "raw": list(seg["raw"]),
+              "out_dur": round(seg.get("out_dur", raw_len), 3)}
+        if seg.get("role") == "tail":
+            op["freeze_from"] = "start"      # hold the result, not the teardown
+        return [op]
 
 
 _STRATEGIES = [HardStrategy(), BootStrategy(), SoftStrategy()]

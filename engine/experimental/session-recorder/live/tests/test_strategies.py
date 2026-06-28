@@ -11,6 +11,18 @@ def test_verbatim_classification():
     assert strategies.strategy_for_kind("soft").verbatim is False
 
 
+def test_tail_soft_freezes_from_start_not_calmest():
+    # the tail's raw range runs through the Ctrl+C teardown into a blank shell;
+    # it must freeze the RESULT (its start), not the globally-calmest frame.
+    tail = {"kind": "soft", "role": "tail", "raw": [40.0, 47.0], "out_dur": 12.0}
+    ops = strategies.strategy_for(tail).splice_ops(tail)
+    assert ops[0]["freeze_from"] == "start"
+
+def test_non_tail_soft_has_no_freeze_from():
+    pre = {"kind": "soft", "role": "pre", "raw": [4.0, 6.0], "out_dur": 5.0}
+    assert "freeze_from" not in strategies.strategy_for(pre).splice_ops(pre)[0]
+
+
 def test_hard_copies_verbatim():
     ops = strategies.strategy_for({"kind": "hard", "raw": [4.0, 8.0]}).splice_ops(
         {"kind": "hard", "raw": [4.0, 8.0]})
