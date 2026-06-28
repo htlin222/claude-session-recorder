@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
-"""session_panel.py — Roadmap #3 "session mode": composite the filmed claude
-session (left, 1200px) with an explainshell-style panel (right, 720px).
+"""panel.py — v6 right-side explainshell panel, TIMED FROM THE LEDGER.
 
-The panel shows what the subtitles don't (the three-layer rule: voice = why,
-subtitles = synced text, panel = structure):
-  * LAUNCH phase  -> the `claude <flags>` command dissected, each flag revealed
-                     as it is typed (appear-on-type), with a hand-written note.
-  * each TURN     -> the actions claude took, from the hook timeline (Write /
-                     Edit / Bash …), each row appearing at the moment it happened,
-                     then the Stop conclusion.
+v5's session_panel.py re-derived per-turn windows from the video + a separate
+session_sync.json, which could disagree with the terminal stage by a frame (the
+"畫音亂套" desync bug class). v6 fixes this structurally: EVERY keyframe time the
+panel uses comes from the SAME `ledger.json` that splice reconciled and overlay
+muxed against. So left-terminal == right-panel == narration by construction.
 
-Timing comes from session_sync.json (launch beat reveals, per-turn typing/submit/
-stop in video time) + the hook timeline. A tool event's video time is
-`submit_i + (event_wall - UserPromptSubmit_i_wall)` (after Enter, wall == video).
+The timeline JSONL (the hook log) is read ONLY to LABEL tool events — never for
+timing. A tool event's wall-clock can't be mapped to video time directly (it
+drifts), so each PreToolUse is placed into its turn's HARD output window by its
+wall-clock fraction of the turn (the window itself comes from the ledger).
 
-Prereq: run session_overlay.py first (writes session_sync.json + session.mp4 with
-the narration track; we reuse its audio). Render the terminal at 1200x1080
-(`gen_session_tape.py --width 1200 --height 1080`). Needs Pillow + ffmpeg.
+What the panel shows (same as v5):
+  * LAUNCH phase -> the `claude <flags>` command dissected, each flag revealed
+                    when its launch_flag beat's panel.switch_at fires.
+  * each TURN    -> a header (at the turn's intro beat panel.switch_at), the
+                    turn's tool actions (Write / Edit / Bash …) each appearing at
+                    the moment it happened (mapped into the hard window), then the
+                    conclusion at the turn's hard out-end (= done in output time).
 
 Out: <demo>/session_panel.mp4  (1920x1080, terminal + panel + narration).
 """
@@ -183,6 +185,86 @@ def last_session(timeline):
     return rows[starts[-1] :] if starts else rows
 
 
+# ---------------------------------------------------------------------------
+# timing — derived PURELY from the ledger
+# ---------------------------------------------------------------------------
+def _is_flag_beat(b):
+    """A launch_flag beat that actually reveals a flag (vs the launch intro/outro
+    narration, which authors as the same kind). Use the synthesized clip name:
+    flags are `open_flag*`, the framing beats are `open_intro`/`open_outro`. With
+    no voice info (e.g. a bare unit fixture), treat it as a flag reveal."""
+    v = b.get("voice")
+    if not v or not v.get("clip"):
+        return True
+    return "flag" in os.path.basename(v["clip"])
+
+
+def keyframe_times(led):
+    """PURE: walk the ledger's beats + meta.segments and emit an ordered list of
+    keyframe dicts derivable WITHOUT the timeline:
+
+      {"t": <output sec>, "type": "launch",      "reveal": <cumulative flags>}
+      {"t": <output sec>, "type": "turn_header", "turn": <idx>}
+      {"t": <output sec>, "type": "conclusion",  "turn": <idx>}
+
+    Tool events need the timeline to label them and the hard-window mapping to
+    place them, so they are merged in `main()`, not here.
+    """
+    beats = led["beats"]
+    segs = led["meta"]["segments"]
+    keys = []
+
+    # launch: each launch_flag beat's panel.switch_at reveals one more flag.
+    launch_beats = sorted(
+        (b for b in beats if b["kind"] == "launch_flag" and not b.get("drop")),
+        key=lambda b: b["panel"]["switch_at"],
+    )
+    revealed = 0
+    for b in launch_beats:
+        if _is_flag_beat(b):
+            revealed += 1
+        keys.append({"t": b["panel"]["switch_at"], "type": "launch", "reveal": revealed})
+
+    # per-turn header: the turn's intro beat panel.switch_at.
+    for b in beats:
+        if b["kind"] == "intro" and not b.get("drop"):
+            keys.append({"t": b["panel"]["switch_at"], "type": "turn_header",
+                         "turn": b["turn_idx"]})
+
+    # conclusion: each turn's hard segment out-end (= done in output time).
+    for s in segs:
+        if s.get("kind") == "hard":
+            keys.append({"t": s["out"][1], "type": "conclusion", "turn": s["turn_idx"]})
+
+    keys.sort(key=lambda k: k["t"])
+    return keys
+
+
+def _tool_events(led, rows, turn_idx, ups_wall, stop_wall):
+    """Label + place the PreToolUse events of one turn. Labels come from the
+    timeline; the OUTPUT time of each event is its wall-clock FRACTION of the turn
+    mapped into the turn's HARD output window — both window edges from the ledger.
+    """
+    hard = next(s for s in led["meta"]["segments"]
+                if s.get("kind") == "hard" and s["turn_idx"] == turn_idx)
+    submit_out = hard["out"][0] + (hard.get("submit", hard["raw"][0]) - hard["raw"][0])
+    done_out = hard["out"][1]
+    span_w = max(0.1, stop_wall - ups_wall)
+    out = []
+    for r in rows:
+        if r["event"] != "PreToolUse" or not (ups_wall < r["t"] <= stop_wall):
+            continue
+        frac = min(1.0, max(0.0, (r["t"] - ups_wall) / span_w))
+        ev_out = submit_out + frac * (done_out - submit_out)
+        detail = r.get("detail", "")
+        tool = detail.split(" ", 1)[0]
+        target = detail.split(" ", 1)[1] if " " in detail else ""
+        target = os.path.basename(target) if "/" in target else target[:36]
+        out.append({"t": round(ev_out, 3), "type": "tool", "turn": turn_idx,
+                    "tool": tool, "target": target})
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -191,95 +273,59 @@ def main():
     ap.add_argument("--timeline", default=None)
     args = ap.parse_args()
     demo = os.path.abspath(args.demo)
-    here = os.path.dirname(os.path.abspath(__file__))
-    timeline = args.timeline or (
-        os.path.join(demo, "session-timeline.jsonl")
-        if os.path.exists(os.path.join(demo, "session-timeline.jsonl"))
-        else os.path.join(os.path.dirname(here), "session-timeline.jsonl")
-    )
-    plan = json.load(open(os.path.join(demo, "plan.json"), encoding="utf-8"))
-    sync = json.load(open(os.path.join(demo, "session_sync.json"), encoding="utf-8"))
+    timeline = args.timeline or os.path.join(demo, "session-timeline.jsonl")
+
+    led = json.load(open(os.path.join(demo, "ledger.json"), encoding="utf-8"))
+    cap = json.load(open(os.path.join(demo, "capture.json"), encoding="utf-8"))
+    lc = cap.get("launch", {})
+    cmd = lc.get("base", "claude")
+    flags = lc.get("flags", [])
+    turns = cap["turns"]
+
     rows = last_session(timeline)
     ups = [r for r in rows if r["event"] == "UserPromptSubmit"]
     stop = [r for r in rows if r["event"] == "Stop"]
-    flags = (
-        plan["open"]["flags"]
-        if "flags" in plan.get("open", {})
-        else [{"arg": b["token"], "say": b["text"]} for b in plan["open"]["beats"][1:]]
-    )
-    cmd = plan["open"].get("command", "")
-    turns = plan["turns"]
-    nfb = len(plan["open"]["beats"])  # beats incl base
 
-    # ---- panel keyframes: (video_time, PIL image) ----
-    keys = []
-    pdir = os.path.join(demo, "_panels")
-    os.makedirs(pdir, exist_ok=True)
-    # launch: reveal each flag WHEN ITS NARRATION STARTS (= the voice onset), so
-    # the panel and voice appear TOGETHER and early — not delayed to the terminal
-    # typing (which lags the voice). open_beats are [base, flag1, flag2, …] in
-    # order; beat k's onset reveals k flags (k=0 -> just "$ claude").
-    for k, ob in enumerate(sync["open_beats"]):
-        keys.append((round(ob["onset"], 3), ("launch", k)))
-    # turns: header when the prompt is submitted; each tool event mapped into the
-    # DETECTED [submit, done] window by its wall-clock FRACTION of the turn (the
-    # window is from the video; the timeline only orders/labels the events, since
-    # wall-clock can't be mapped to video time directly — it drifts). Conclusion
-    # at the detected `done`.
-    for ti, (t, u, s) in enumerate(zip(turns, ups, stop)):
-        st = sync["turns"][ti]
-        sub_v, done_v = st["submit"], st["done"]
-        # header appears WITH the intro voice (early), not at submit
-        keys.append((round(st["intro_onset"], 3), ("turn", ti, 0, False)))
-        evs = [
-            r for r in rows if r["event"] == "PreToolUse" and u["t"] < r["t"] <= s["t"]
-        ]
-        span_w = max(0.1, s["t"] - u["t"])  # turn span (wall)
-        seen = 0
-        for ev in evs:
-            seen += 1
-            frac = min(1.0, max(0.0, (ev["t"] - u["t"]) / span_w))
-            ev_v = sub_v + frac * (done_v - sub_v)  # -> video time
-            evd = ev.get("detail", "")
-            tool = evd.split(" ", 1)[0]
-            target = evd.split(" ", 1)[1] if " " in evd else ""
-            target = os.path.basename(target) if "/" in target else target[:36]
-            keys.append((round(ev_v, 3), ("turn", ti, seen, False, (tool, target))))
-        keys.append((round(done_v, 3), ("turn", ti, seen, True)))  # conclusion
-    keys.sort(key=lambda x: x[0])
+    # ledger-derived keyframes (launch reveals, turn headers, conclusions) …
+    keys = keyframe_times(led)
+    # … plus the timeline tool events mapped into each turn's hard output window.
+    for ti in range(len(turns)):
+        if ti >= len(ups) or ti >= len(stop):
+            break
+        keys.extend(_tool_events(led, rows, ti, ups[ti]["t"], stop[ti]["t"]))
+    keys.sort(key=lambda k: k["t"])
 
-    # render each keyframe cumulatively
+    # conclusion text: the turn's Stop message (first line), else the ledger outro.
+    outro_txt = {b["turn_idx"]: b.get("text", "")
+                 for b in led["beats"] if b["kind"] == "outro"}
+
     def conclusion_text(ti):
         m = stop[ti].get("message", "") if ti < len(stop) else ""
-        return (m.split("\n")[0] if m else turns[ti]["outro"]["text"])[:80]
+        return (m.split("\n")[0] if m else outro_txt.get(ti, ""))[:80]
 
+    # render each keyframe cumulatively to a PNG (as v5 does)
+    pdir = os.path.join(demo, "_panels")
+    os.makedirs(pdir, exist_ok=True)
     turn_events = {ti: [] for ti in range(len(turns))}
     segs = []
-    for idx, (t, spec) in enumerate(keys):
-        if spec[0] == "launch":
-            img = launch_panel(cmd, flags, spec[1])
+    for idx, k in enumerate(keys):
+        if k["type"] == "launch":
+            img = launch_panel(cmd, flags, min(k["reveal"], len(flags)))
         else:
-            _, ti, nrev, concl = spec[:4]
-            if len(spec) == 5:  # an event row to add
-                tool, target = spec[4]
-                turn_events[ti].append({"tool": tool, "target": target})
-            img = turn_panel(
-                ti + 1,
-                len(turns),
-                turns[ti]["prompt"],
-                turn_events[ti],
-                nrev,
-                conclusion_text(ti) if concl else None,
-            )
+            ti = k["turn"]
+            if k["type"] == "tool":
+                turn_events[ti].append({"tool": k["tool"], "target": k["target"]})
+            concl = conclusion_text(ti) if k["type"] == "conclusion" else None
+            img = turn_panel(ti + 1, len(turns), turns[ti]["prompt"],
+                             turn_events[ti], len(turn_events[ti]), concl)
         p = os.path.join(pdir, f"p{idx:03d}.png")
         img.save(p)
-        segs.append((p, t))
+        segs.append((p, k["t"]))
 
     # build the panel video (each png held until the next keyframe)
-    vtot = sync["video_total"]
+    vtot = led["meta"]["vtot_out"]
     lst = os.path.join(pdir, "panels.txt")
     with open(lst, "w") as f:
-        # blank panel before the first keyframe
         blank = os.path.join(pdir, "blank.png")
         _new()[0].save(blank)
         f.write(f"file '{blank}'\nduration {segs[0][1]:.3f}\n")
@@ -308,7 +354,9 @@ def main():
             "20",
             "-vsync",
             "cfr",
-            panel_mp4,
+            "-t",
+            f"{vtot:.3f}",          # the concat's trailing-repeat frame overshoots
+            panel_mp4,              # under CFR; cap the panel at the ledger total
         ],
         check=True,
         capture_output=True,
@@ -345,6 +393,8 @@ def main():
             "aac",
             "-b:a",
             "192k",
+            "-t",
+            f"{vtot:.3f}",          # end exactly with the terminal+audio (no dead tail)
             out,
         ],
         check=True,

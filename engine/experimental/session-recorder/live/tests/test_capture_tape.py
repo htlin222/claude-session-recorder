@@ -1,0 +1,71 @@
+import gen_capture_tape as g
+
+SPEC = {
+    "launch": {"base": "claude", "flags": [{"arg": "--model opus"}]},
+    "turns": [{"prompt": "write fizzbuzz"}, {"prompt": "add a test"}],
+}
+
+
+def test_tape_has_minimal_fixed_pads_and_no_voice(tmp_path):
+    tape, plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                          font_size=26, word_delay=220)
+    # one sentinel wait per turn, in order
+    assert "VHS_TURN_DONE_1" in tape and "VHS_TURN_DONE_2" in tape
+    # launch typed token-by-token: base then each flag
+    assert 'Type "claude"' in tape and 'Type " --model opus"' in tape
+    # NO voice-sized sleeps: pads are the fixed PAD constant only
+    assert f"Sleep {g.PAD:.3f}s" in tape
+    # capture.json carries type_dur per turn for typing_start derivation
+    assert plan["turns"][0]["type_dur"] > 0
+    assert plan["turns"][0]["prompt"] == "write fizzbuzz"
+    assert len(plan["turns"]) == 2
+
+
+def test_capture_plan_lists_launch_tokens(tmp_path):
+    _tape, plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                           font_size=26, word_delay=220)
+    assert plan["launch"]["tokens"] == ["claude", "--model opus"]
+
+
+def test_render_voice_paces_the_launch(tmp_path):
+    # When launch_voice is supplied, the launch is sized to the NARRATION (each
+    # flag is narrated FIRST via a Sleep<dur>, THEN the token is typed) — not the
+    # fixed PAD. This kills the v6 boot freeze (capture too short for the voice).
+    launch_voice = [
+        {"token": "claude", "text": "啟動", "mp3": "_voice/open_intro.mp3", "dur": 1.7},
+        {"token": "--model opus", "text": "用 opus", "mp3": "_voice/open_flag0.mp3", "dur": 2.3},
+    ]
+    launch_outro = {"text": "進入畫面", "mp3": "_voice/open_outro.mp3", "dur": 1.9}
+    tape, plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                          font_size=26, word_delay=220,
+                          launch_voice=launch_voice, launch_outro=launch_outro)
+    # voice-paced Sleeps for the launch narration durations (NOT the fixed PAD)
+    assert "Sleep 1.700s" in tape and "Sleep 2.300s" in tape
+    # the token is typed AFTER its narrate-Sleep (voice leads the visual)
+    intro_sleep = tape.index("Sleep 1.700s")
+    type_claude = tape.index('Type "claude"')
+    assert intro_sleep < type_claude
+    flag_sleep = tape.index("Sleep 2.300s")
+    type_flag = tape.index('Type " --model opus"')
+    assert flag_sleep < type_flag
+    # capture-plan launch beats carry INCREASING raw onsets (`at`)
+    beats = plan["launch"]["beats"]
+    assert len(beats) == 2
+    ats = [b["at"] for b in beats]
+    assert ats == sorted(ats) and ats[0] < ats[1]
+    assert beats[0]["at"] == g.PRELUDE        # base beat narrates at the prelude
+    assert beats[0]["mp3"] == "_voice/open_intro.mp3"
+    # outro rides the boot; its onset is the Enter time (after the last flag)
+    outro = plan["launch"]["outro"]
+    assert outro["at"] > ats[-1]
+
+
+def test_tape_overrides_inherited_prompt(tmp_path):
+    # regression: VHS defaults to bash and inherits the EXPORTED p10k `PS1`,
+    # rendering it as full-screen `${_p9k_…}` garbage that uglified the frame and
+    # broke detect_turns with false submissions. The tape MUST override PS1/PROMPT
+    # (the verified fix) regardless of shell; ZDOTDIR is kept as zsh defense.
+    tape, _plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                           font_size=26, word_delay=220)
+    assert 'Env PS1' in tape and 'Env PROMPT' in tape
+    assert 'Env ZDOTDIR' in tape

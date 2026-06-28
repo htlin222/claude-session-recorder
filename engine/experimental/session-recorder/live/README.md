@@ -13,53 +13,101 @@ outro in the post-output hold, and only the *think* voice must fit the real gap
 (loop-until-align). Anchors are read from the video's own pixels (the input line
 lights up while typing, clears on submit) — not tape arithmetic, which drifts.
 
-## Files
+## Files (v6)
 | File | Role |
 | --- | --- |
 | `claude_sandbox.sh` | Stage an **isolated** Claude Code project: own `CLAUDE_CONFIG_DIR` (focus off, no dialogs, pinned model, credentials copied) + project hooks wiring `timelog.py` **and** the sentinel. |
 | `vhs_stop_sentinel.sh` | Stop hook printing the on-screen `VHS_TURN_DONE_N` marker VHS waits on (gated on `$VHS_DEMO`). |
 | `script.example.json` | The narration script: a `launch` block (the opening CLI lesson), per-turn `{prompt, intro, think, outro}`, and a `close`. |
-| `gen_session_tape.py` | `script.json` → a VHS tape with deterministic intro/outro voice slots (sized to the synthesized clips), plus `plan.json` + `_voice/*.mp3`. |
-| `session_overlay.py` | Detects every per-turn anchor (typing_start, submit, done) FROM THE VIDEO (the hook wall-clock drifts ~8s from VHS video time — unusable), places each clip (intro leads typing, think rides `[submit,done]`, outro/open/close in their slots), muxes the narration over `terminal.mp4` → `session.mp4` + `.srt`. The input band auto-locates (bottom variance peak) — no per-layout tuning. |
-| `session_panel.py` | (Optional) Roadmap #3 right panel: composites `terminal.mp4` (left, 1200px) with a 720px panel — launch flags dissected (appearing WITH the voice), then each turn's tool actions (from the timeline, mapped into the detected `[submit,done]` window by wall-clock fraction) + the conclusion → `session_panel.mp4`. |
-| `verify_session.py` | Gate: voice-leads-typing, think fits the gap, no overlap, min-gap. Exit 0 PASS / 1 fixable / 2 structural. |
+| `run_v6.sh` | **The driver.** `run_v6.sh <demo> <script.json>` runs the whole pipeline below, launching `claude` exactly once (in the vhs step). |
+| `ledger.py` | The single source of truth (`{beats, meta}`) + helpers (`beat_id`, `beat_start/end`, `serialization_violations`, `output_timeline`, `BREATH`). Every stage reads it; nobody re-derives a time it already holds. |
+| `gen_capture_tape.py` | `script.json` → a **prompts-only** minimal VHS tape (no voice) + `capture.json`. |
+| `detect_anchors.py` | Reused v5 `signals()` + peak-based `detect_turns()`: boot, per-turn `typing_start/submit/done`, soft-gap ranges, tool-event times — all in **raw-video time**. |
+| `author.py` | Phase 1: synth + measure voice, compute each beat's soft length, apply tiers, fill the ledger's soft fields + `drop` flags → every beat's final start/end is KNOWN. |
+| `splice.py` | Phase 2: ffmpeg freeze-frame re-time the soft segments of `terminal_raw.mp4` → `terminal.mp4`, and **reconcile** the ledger to the realized video (see below). |
+| `overlay.py` | Phase 2: mux the voice clips at the ledger's computed onsets over `terminal.mp4` → `session.mp4` + `.srt`. |
+| `panel.py` | Phase 2: build the explainshell-style right panel from the **same** ledger → `session_panel.mp4`. |
+| `lint.py` | Phase 3: deterministic gate — the serialization invariant + internal relations on the finalized ledger (`--filmstrip` extracts a labelled eyeball strip). Failures are authoring errors, not detection noise. |
 
-## Pipeline
+## Pipeline (claude runs **once**)
 ```bash
 SR=engine/experimental/session-recorder
-DEMO=/tmp/sess
-rm -f "$SR/session-timeline.jsonl"          # one recording per timeline
-
-# 1) clean isolated sandbox (idempotent)
-"$SR/live/claude_sandbox.sh" "$DEMO"
-
-# 2) author tape + voice slots + plan.json from the narration script.
-#    Render at 1200x1080 if you want the right-side panel (step 6).
-python3 "$SR/live/gen_session_tape.py" --demo "$DEMO" \
-        --script "$SR/live/script.example.json" \
-        --width 1200 --height 1080 --font-size 26 -o "$DEMO/session.tape"
-
-# 3) film the real TUI -> terminal.mp4 (+ session-timeline.jsonl from the hooks)
-cd "$DEMO" && vhs session.tape
-
-# 4) place the narration (needs numpy -> repo venv) -> session.mp4 + .srt
-.venv/bin/python "$SR/live/session_overlay.py" --demo "$DEMO"
-
-# 5) gate the sync (loop until it passes)
-python3 "$SR/live/verify_session.py" --demo "$DEMO"
-
-# 6) (optional) add the explainshell-style right panel -> session_panel.mp4
-.venv/bin/python "$SR/live/session_panel.py" --demo "$DEMO"
+"$SR/live/run_v6.sh" /tmp/sess "$SR/live/script.example.json"
 ```
-If step 5 reports a turn whose **think voice overruns** its real gap (claude
-answered too fast), the think is auto-dropped (a missing think beats a bleeding
-one); shorten that turn's `think` line if you want it kept. voice-leads-typing and
-overlaps are structural and should never fail; if they do it's a placement bug.
+The driver runs five phases; `claude` launches **only** in the vhs step:
 
-`validate_sync.py --demo <demo>` is the stress-test harness: it re-checks the
-programmatic invariants AND extracts a labelled filmstrip from the composite so
-you can eyeball "left terminal == right panel == the narrated moment" at each
-detected anchor. Run it on every recording.
+- **Phase 0 — capture.** Stage the sandbox (idempotent), generate a prompts-only
+  minimal tape (`gen_capture_tape.py`), then `vhs session.tape` films the real TUI
+  **once** → `terminal_raw.mp4` + `session-timeline.jsonl`. The driver exports `SR`
+  and `HERE` (the claude-spawned hooks reference `$SR/timelog.py` and
+  `$HERE/vhs_stop_sentinel.sh`) and scrubs the inherited prompt env (`PS1/PROMPT`,
+  `_P9K_*`) so VHS's bash doesn't dump the p10k prompt full-screen.
+- **Phase 1 — author** (`author.py`, runs detection in-process — no relaunch):
+  synth + measure each voice clip, compute each beat's required soft length, apply
+  the tiers, write the ledger's soft fields + `drop` flags. Every beat's final
+  start/end is now known.
+- **Phase 2 — splice/overlay/panel.** `splice.py` freeze-frame re-times the soft
+  segments → `terminal.mp4` and **reconciles** the ledger to the realized video;
+  `overlay.py` muxes the voice → `session.mp4` + `.srt`; `panel.py` builds the
+  right panel → `session_panel.mp4`. All three read the **same** reconciled ledger.
+- **Phase 3 — lint** (`lint.py --filmstrip`): the deterministic gate.
+
+### The ledger (`ledger.json`) — single source of truth
+`{"beats": [...], "meta": {...}}`. A **beat** is the atomic unit
+(`narration-start / pane-switch → CLI input → execution → result`):
+
+| field | meaning |
+| --- | --- |
+| `id` | `sha1(kind\|turn_idx\|payload)[:6]` — stable across re-authoring (a beat's identity survives editing its siblings). |
+| `kind` | `launch_flag` \| `intro` \| `think` \| `outro` \| `close`. |
+| `turn_idx` | which turn the beat belongs to. |
+| `tier` | `1` must-keep \| `2`/`3` droppable (see table). |
+| `mode` | `lead` (voice fully precedes the visual) \| `ride` (voice rides the hard visual `[visual.start, visual.end]`). |
+| `voice` | `{clip, start, end}` — synthesized clip + its placed window. |
+| `visual` | `{start, end}` — terminal action window (raw video time). |
+| `panel` | `{switch_at}` — pane content swap (= `voice.start`). A switch at literal `0.0` is panel init, not beat activity. |
+| `raw` | the beat's raw-video segment(s) before re-timing. |
+| `drop` | set true by author/lint when a Tier-2/3 beat can't fit. |
+
+`meta.segments` is the ordered cut list — each `{raw, out, out_dur}` (raw bound,
+output window, output duration); hard/boot segments copy verbatim, soft segments
+become a freeze held for `out_dur`. `meta.vtot_out` is the total output duration
+of `terminal.mp4`.
+
+### Priority tiers (what may be dropped)
+| Tier | beats | guaranteed by | when too short |
+| --- | --- | --- | --- |
+| **1 must-keep** | the lead spine — `intro`, each `launch_flag`, `outro`/`close` | soft slot → freeze-frame **stretched** (host-frozen) to fit the voice | impossible → **never dropped** |
+| **2 droppable** | `think` (rides the hard `[submit,done]` gap) | trimmed to fit the measured gap | trim at clause boundary; if the first clause still overruns → **drop** |
+
+The spine is "the explanation before each command" — a *structural* guarantee in
+v6 (stretch the static frame), not a hope.
+
+### The one invariant
+```
+beat[i].end + BREATH ≤ beat[i+1].start
+where beat.end = max(voice.end, visual.end, panel activity end)
+```
+Every channel of a beat quiesces (with a `BREATH = 0.5s` of silence) before the
+next beat starts. Cross-beat overlap is forbidden; cross-channel overlap is
+contained inside a beat. This single rule subsumes v5's separate
+min-gap / no-overlap / outro-vs-next-intro checks (`serialization_violations`).
+
+### splice RECONCILES the ledger
+Freeze-frame re-timing produces slightly different realized durations than the
+plan. `splice.py` measures the realized `terminal.mp4` and rewrites the ledger's
+segment `out`/`out_dur`/`vtot_out` (and the dependent beat times) so that **every
+downstream stage reads numbers that match the frames** — `overlay.py`'s voice mux,
+`session.srt`, and `panel.py`'s keyframes are all driven off the same reconciled
+ledger. No re-record.
+
+### v5 retired
+The v5 files (`gen_session_tape.py`, `session_overlay.py`, `session_panel.py`,
+`verify_session.py`, `validate_sync.py`) have been **removed** — v6 passed the
+end-to-end validation (lint PASS, `claude` launched once, left-terminal ==
+right-panel == narration confirmed on the file-writing + text-Q&A + mixed
+scenario in `script.mixed.json`). v6's `detect_anchors.py` carries a verbatim copy
+of v5's `signals()`/`detect_turns()`, so nothing of the detection was lost.
 
 ## How detection survives response-heavy multi-turn sessions
 Naively thresholding the input band breaks when a session has several file-writing
@@ -71,8 +119,9 @@ sits MODERATELY bright. So `detect_turns` takes the contiguous runs where the
 (tight, auto-located) band exceeds HALF its max — exactly the N submissions —
 and derives `typing_start` from the tape's known typing duration. `done` is the
 last full-frame content jump before the next submit (absorbs long think gaps).
-Validated across text-Q&A, single-tool, and 3-turn file-writing recordings; run
-`validate_sync.py` on anything new.
+Validated across text-Q&A, single-tool, and 3-turn file-writing recordings. This
+logic lives verbatim in `detect_anchors.py` now; run `lint.py --demo <demo>`
+(the deterministic gate) on anything new.
 
 ## The opening is a CLI lesson
 The `launch` block treats starting `claude` like the repo's rsync/jq lessons:
