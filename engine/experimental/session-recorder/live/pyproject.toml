@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-session-recorder"
+version = "0.1.0"
+description = "Record narrated, sync-verified videos of a real Claude Code TUI session"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Hsiehting Lin" }]
+keywords = [
+    "claude",
+    "claude-code",
+    "tui",
+    "screen-recording",
+    "vhs",
+    "voiceover",
+    "demo",
+    "terminal",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Video :: Capture",
+]
+dependencies = [
+    "numpy>=1.24",
+    "Pillow>=10",
+    "edge-tts>=6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+# CLI entry point. record.py is provided by the parallel CLI agent and exposes main().
+record-session = "record:main"
+
+[project.urls]
+# NOTE: placeholder GitHub URL — update on real open-source publish.
+Homepage = "https://github.com/htlin222/claude-session-recorder"
+Repository = "https://github.com/htlin222/claude-session-recorder"
+
+[tool.setuptools]
+# Flat layout: the package is a set of top-level modules in this directory.
+# List them explicitly so an editable/flat install picks up exactly these
+# modules (and never the tests/ directory).
+py-modules = [
+    "ledger",
+    "detect_anchors",
+    "gen_capture_tape",
+    "author",
+    "splice",
+    "overlay",
+    "panel",
+    "lint",
+    "strategies",
+    "qnav",
+    "qparse",
+    "qmonitor",
+    "autoanswer_questions",
+    "record",
+]
+
+[tool.pytest.ini_options]
+# The pure-logic unit tests run with no external tools installed — they exercise
+# the deterministic core (ledger, anchors, splice math, overlay/panel layout,
+# question parsing). The recording pipeline itself additionally needs vhs,
+# ffmpeg/ffprobe, tmux and ImageMagick, which are NOT required to run tests/.
+testpaths = ["tests"]

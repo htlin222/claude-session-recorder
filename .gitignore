@@ -49,3 +49,12 @@ engine/experimental/session-recorder/_seg/
 # Stage them under /tmp (outside the repo); this is a belt-and-suspenders guard
 # in case one is ever created inside the tree. terminal.mp4 is covered by *.mp4.
 .cfg/
+
+# ── python packaging / test build outputs ────────────────────────
+# session-recorder/live is pip-installable; these are throwaway build artifacts.
+# Demo OUTPUT dirs (recordings, intermediate frames) live under /tmp, not the
+# repo — see the .cfg/ note above.
+*.egg-info/
+build/
+dist/
+.pytest_cache/

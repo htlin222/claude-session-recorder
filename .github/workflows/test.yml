@@ -1,0 +1,37 @@
+name: tests
+
+# Runs the deterministic-core UNIT tests for the session-recorder package.
+#
+# NOTE: the recording pipeline itself needs macOS + vhs + a real Claude Code TUI
+# (plus ffmpeg, tmux, ImageMagick) and is NOT run in CI. CI covers only the pure
+# unit tests in tests/ — the deterministic core (ledger, anchors, splice math,
+# overlay/panel layout, question parsing).
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package (with dev extras)
+        run: pip install -e "engine/experimental/session-recorder/live[dev]"
+
+      - name: Run unit tests
+        run: |
+          cd engine/experimental/session-recorder/live
+          python -m pytest tests/ -v

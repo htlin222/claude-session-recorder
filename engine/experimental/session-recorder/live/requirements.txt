@@ -1,0 +1,19 @@
+# Runtime Python dependencies (mirror of pyproject.toml [project.dependencies]).
+numpy>=1.24
+Pillow>=10
+edge-tts>=6
+
+# ─────────────────────────────────────────────────────────────────────────────
+# External CLI prerequisites — NOT pip-installable. The recording pipeline
+# shells out to these; install them separately before recording:
+#
+#   vhs         — terminal recorder (drives the scripted capture)
+#   ffmpeg      — mux / freeze-frame splice / audio (ffprobe ships with it)
+#   tmux        — drives the live/adaptive nested Claude session
+#   ImageMagick — `magick` for frame composition / panel overlays
+#   edge-tts    — also exposed as a CLI for narration synthesis
+#
+# macOS (Homebrew + pipx):
+#   brew install vhs ffmpeg tmux imagemagick
+#   pipx install edge-tts
+# ─────────────────────────────────────────────────────────────────────────────
