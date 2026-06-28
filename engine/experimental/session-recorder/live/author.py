@@ -163,12 +163,15 @@ def build_ledger(demo, script, anchors, write=True):
         if s["kind"] == "boot":
             if use_captured:
                 # boot is copied 1:1 — the capture was paced to the launch voice,
-                # so NO freeze-extend for the launch. Only the outro may ride a
-                # touch past the boot's raw end; keep a SMALL freeze tail for that
-                # remainder (usually none — outro_end <= raw_len).
-                outro_end = ((captured_outro["at"] + captured_outro["dur"])
-                             if captured_outro else 0.0)
-                s["out_dur"] = round(max(raw_len, outro_end), 3)
+                # so NO freeze-extend for the launch. The boot must end at least a
+                # BREATH after the LAST launch narration (the outro, or the last
+                # flag if no outro), so turn-0's intro in the next soft segment is
+                # cleanly separated — else the outro tail overlaps it by a frame.
+                ends = [b["at"] + b["dur"] for b in captured_launch]
+                if captured_outro:
+                    ends.append(captured_outro["at"] + captured_outro["dur"])
+                last_end = max(ends) if ends else 0.0
+                s["out_dur"] = round(max(raw_len, last_end + BREATH), 3)
             else:
                 # boot hosts the launch beats sequentially, then a trailing BREATH
                 # so the last launch voice clears before turn-0's intro. Freeze-
