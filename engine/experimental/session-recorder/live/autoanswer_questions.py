@@ -123,27 +123,31 @@ def handle(data, answers, mode, signal_dir):
     `auto`   -> DENY carrying the chosen answers (recording proceeds invisibly,
                 never hangs). Writes NO signal file.
     `render` -> ALLOW (so the selector renders) and write a `pending_q.json`
-                signal under signal_dir describing the FIRST question + options +
-                the chosen target, so an external driver can pick it on screen.
+                signal under signal_dir describing ALL questions + options + the
+                chosen target per question, so an external driver can pick them
+                on screen. A multi-question AskUserQuestion renders one tab per
+                question (auto-advancing on each answer) plus a Submit tab, so
+                the driver needs every question, not just the first.
     """
     tool_input = data.get("tool_input", {}) or {}
     questions = tool_input.get("questions", []) or []
     if mode == "render":
         if questions:
-            q = questions[0]
-            labels = _labels(q)
-            ti = target_index_for(q, answers) or 0
-            rec = {
-                "header": q.get("header", ""),
-                "question": q.get("question", ""),
-                "options": labels,
-                "target_index": ti,
-                "target_label": labels[ti] if labels else None,
-                "multiSelect": q.get("multiSelect", False),
-            }
+            recs = []
+            for q in questions:
+                labels = _labels(q)
+                ti = target_index_for(q, answers) or 0
+                recs.append({
+                    "header": q.get("header", ""),
+                    "question": q.get("question", ""),
+                    "options": labels,
+                    "target_index": ti,
+                    "target_label": labels[ti] if labels else None,
+                    "multiSelect": q.get("multiSelect", False),
+                })
             os.makedirs(signal_dir, exist_ok=True)
             with open(os.path.join(signal_dir, "pending_q.json"), "w") as f:
-                json.dump(rec, f)
+                json.dump({"questions": recs}, f)
         return allow_payload()
     # auto (default)
     chosen = choose_answers(tool_input, answers)

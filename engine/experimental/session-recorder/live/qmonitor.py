@@ -16,7 +16,40 @@ import sys
 import time
 
 import qnav
-import qparse
+
+
+def _as_questions(pending):
+    """Normalise a pending signal to a list of question dicts. Accepts the new
+    multi-question shape ({"questions": [...]}) and, for backward-compat, an
+    old-style single-question signal (target_index/options at the top level)."""
+    if isinstance(pending, dict) and pending.get("questions") is not None:
+        return pending["questions"]
+    return [pending]
+
+
+def plan_keystrokes(pending):
+    """The FULL key sequence to answer every question in `pending` up front.
+
+    A multi-question AskUserQuestion renders one tab per question and
+    AUTO-ADVANCES to the next tab on each answer-Enter, landing on a final Submit
+    tab after the last question. The highlight resets to option 1 on each new
+    question, so each question contributes qnav.keys_to_select(target, 0)
+    (= Down×target + Enter). When there is more than one question, one extra
+    Enter submits on the Submit tab. A SINGLE question has no Submit tab — its
+    answer-Enter selects and closes, so no trailing Enter.
+
+    Pure; the on-screen order matches the hook's tool_input order and the
+    auto-advance is deterministic, so the whole plan is computable from the
+    signal alone. multiSelect is not yet exercised by the spike."""
+    questions = _as_questions(pending)
+    keys = []
+    for q in questions:
+        # TODO multiSelect: Space-toggle each picked option before Enter; for now
+        # treat a multiSelect question's target as a single pick (Down×target + Enter).
+        keys += qnav.keys_to_select(q.get("target_index", 0), 0)
+    if len(questions) > 1:
+        keys.append("Enter")  # Submit tab
+    return keys
 
 
 def decide_keystrokes(pending, parsed):
@@ -59,22 +92,28 @@ def _log(msg):
 
 
 def _answer_one(session, pending, max_wait, poll, key_gap, socket=None):
-    """Wait for the selector, send the reconciled keystrokes, wait for the
-    confirmation line. Guards every wait with max_wait so it never hangs."""
-    # poll the pane until the selector is live (or give up)
+    """Wait for the selector, send the whole multi-question keystroke plan, wait
+    for the confirmation line. Guards every wait with max_wait so it never hangs.
+
+    The plan is computed up front from the signal (plan_keystrokes): the
+    on-screen question order matches the hook's tool_input order and the selector
+    auto-advances deterministically, so we don't need to re-parse the screen
+    between questions. We only wait for FOOTER_RE to confirm the selector is
+    live before sending."""
+    # poll the pane until the selector footer is live (or give up)
     deadline = time.time() + max_wait
-    parsed = None
+    live = False
     while time.time() < deadline:
-        parsed = qparse.parse_selector(capture(session, socket))
-        if parsed.get("showing"):
+        if re.search(qnav.FOOTER_RE, capture(session, socket)):
+            live = True
             break
         time.sleep(poll)
-    if not parsed or not parsed.get("showing"):
+    if not live:
         _log("selector never showed; moving on")
         return
 
-    keys = decide_keystrokes(pending, parsed)
-    _log(f"selecting {pending.get('target_label')!r} via {keys}")
+    keys = plan_keystrokes(pending)
+    _log(f"answering {len(_as_questions(pending))} question(s) via {keys}")
     for key in keys:
         send(session, key, socket)
         time.sleep(key_gap)  # let the highlight move be visible on the recording

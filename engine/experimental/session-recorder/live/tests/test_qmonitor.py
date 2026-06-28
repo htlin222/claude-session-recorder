@@ -34,3 +34,21 @@ def test_tmux_argv_with_socket():
 
 def test_tmux_argv_without_socket():
     assert qmonitor._tmux_argv(None, "send-keys") == ["tmux", "send-keys"]
+
+
+def test_plan_single_question_no_submit():
+    pending = {"questions": [{"target_index": 1, "options": ["a", "b"]}]}
+    assert qmonitor.plan_keystrokes(pending) == ["Down", "Enter"]   # single: no submit
+
+
+def test_plan_two_questions_with_submit():
+    pending = {"questions": [
+        {"target_index": 0, "options": ["a", "b"]},
+        {"target_index": 1, "options": ["x", "y"]}]}
+    # Q1 default (Enter), Q2 second option (Down,Enter), then Submit (Enter)
+    assert qmonitor.plan_keystrokes(pending) == ["Enter", "Down", "Enter", "Enter"]
+
+
+def test_plan_wraps_legacy_single_signal():
+    legacy = {"target_index": 1, "options": ["a", "b"]}   # old top-level shape
+    assert qmonitor.plan_keystrokes(legacy) == ["Down", "Enter"]

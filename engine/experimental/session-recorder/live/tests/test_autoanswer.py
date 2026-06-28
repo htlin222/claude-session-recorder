@@ -57,16 +57,35 @@ def test_render_mode_allows_and_writes_signal(tmp_path):
     sig = tmp_path / "pending_q.json"
     assert sig.exists()
     rec = json.loads(sig.read_text())
-    assert rec["options"] == ["Python (hello.py)", "Bash (hello.sh)"]
-    assert rec["target_index"] == 0
-    assert rec["target_label"] == "Python (hello.py)"
+    assert rec["questions"][0]["options"] == ["Python (hello.py)", "Bash (hello.sh)"]
+    assert rec["questions"][0]["target_index"] == 0
+    assert rec["questions"][0]["target_label"] == "Python (hello.py)"
 
 
 def test_render_mode_target_override(tmp_path):
     data = {"tool_input": {"questions": Q["questions"]}}
     aq.handle(data, answers={"*": 1}, mode="render", signal_dir=str(tmp_path))
     rec = json.loads((tmp_path / "pending_q.json").read_text())
-    assert rec["target_index"] == 1 and rec["target_label"] == "Bash (hello.sh)"
+    assert rec["questions"][0]["target_index"] == 1
+    assert rec["questions"][0]["target_label"] == "Bash (hello.sh)"
+
+
+def test_render_mode_emits_all_questions(tmp_path):
+    two = {"tool_input": {"questions": [
+        {"question": "Which language?", "header": "Language",
+         "options": [{"label": "Python"}, {"label": "Bash"}]},
+        {"question": "Which filename?", "header": "Filename",
+         "options": [{"label": "hello.py"}, {"label": "main.py"}]},
+    ]}}
+    aq.handle(two, answers={"Filename": 1}, mode="render", signal_dir=str(tmp_path))
+    rec = json.loads((tmp_path / "pending_q.json").read_text())
+    assert len(rec["questions"]) == 2
+    assert rec["questions"][0]["header"] == "Language"
+    assert rec["questions"][0]["target_index"] == 0
+    assert rec["questions"][0]["target_label"] == "Python"
+    assert rec["questions"][1]["header"] == "Filename"
+    assert rec["questions"][1]["target_index"] == 1
+    assert rec["questions"][1]["target_label"] == "main.py"
 
 
 def test_auto_mode_handle_denies(tmp_path):
