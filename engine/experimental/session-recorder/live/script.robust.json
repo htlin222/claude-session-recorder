@@ -9,13 +9,13 @@
     "intro": "我們用 claude 啟動一個互動式 session。",
     "outro": "稍候就進入它的互動畫面。"
   },
-  "close": "就算 Claude 臨時跳出選單問我們，背景的監看程式也會在畫面上自動選好、讓它接著完成 —— 錄影不會卡住。",
+  "close": "臨時跳出的選單，背景程式自動選好，它就接著完成。",
   "turns": [
     {
       "prompt": "Use the AskUserQuestion tool to ask me whether the greeting script should be written in Python or Bash. Wait for my single-question choice, then write the script in that language and run it.",
-      "intro": "這次我們不先腳本化它要問什麼，看它臨時跳出選單時系統怎麼自動接住。",
-      "think": "它需要更多資訊就跳出選項；背景監看程式讀到畫面上的選單，自動替我們選並按 Enter。",
-      "outro": "它收到自動選好的答案，接著就把腳本寫出來並跑出結果。"
+      "intro": "這次不先腳本化它要問什麼，看臨時跳出選單時怎麼自動接住。",
+      "think": "它跳出選項；背景程式讀到畫面上的選單，自動替我們選好按下 Enter。",
+      "outro": "收到自動選好的答案，它就把腳本寫出來跑出結果。"
     }
   ]
 }

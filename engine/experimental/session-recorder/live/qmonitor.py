@@ -41,15 +41,23 @@ def plan_keystrokes(pending):
     Pure; the on-screen order matches the hook's tool_input order and the
     auto-advance is deterministic, so the whole plan is computable from the
     signal alone. multiSelect is not yet exercised by the spike."""
+    return [k for group in plan_groups(pending) for k in group]
+
+
+def plan_groups(pending):
+    """Like plan_keystrokes but GROUPED: one key-group per question, plus a final
+    one-Enter Submit group when there is more than one question. The monitor
+    dwells BETWEEN groups (each Enter auto-advances to a fresh tab) so the viewer
+    can read each question before it is answered on the recording."""
     questions = _as_questions(pending)
-    keys = []
+    groups = []
     for q in questions:
         # TODO multiSelect: Space-toggle each picked option before Enter; for now
         # treat a multiSelect question's target as a single pick (Down×target + Enter).
-        keys += qnav.keys_to_select(q.get("target_index", 0), 0)
+        groups.append(qnav.keys_to_select(q.get("target_index", 0), 0))
     if len(questions) > 1:
-        keys.append("Enter")  # Submit tab
-    return keys
+        groups.append(["Enter"])  # Submit tab
+    return groups
 
 
 def decide_keystrokes(pending, parsed):
@@ -91,7 +99,8 @@ def _log(msg):
     print(f"[qmonitor] {msg}", file=sys.stderr, flush=True)
 
 
-def _answer_one(session, pending, max_wait, poll, key_gap, socket=None):
+def _answer_one(session, pending, max_wait, poll, key_gap, socket=None,
+                read_dwell=2.5):
     """Wait for the selector, send the whole multi-question keystroke plan, wait
     for the confirmation line. Guards every wait with max_wait so it never hangs.
 
@@ -112,11 +121,16 @@ def _answer_one(session, pending, max_wait, poll, key_gap, socket=None):
         _log("selector never showed; moving on")
         return
 
-    keys = plan_keystrokes(pending)
-    _log(f"answering {len(_as_questions(pending))} question(s) via {keys}")
-    for key in keys:
-        send(session, key, socket)
-        time.sleep(key_gap)  # let the highlight move be visible on the recording
+    groups = plan_groups(pending)
+    _log(f"answering {len(_as_questions(pending))} question(s) via {groups}")
+    for group in groups:
+        # DWELL first so the viewer can READ the question (each prior Enter
+        # auto-advanced to a fresh tab), then send this question's keys slowly so
+        # the highlight move + selection is visible on the recording.
+        time.sleep(read_dwell)
+        for key in group:
+            send(session, key, socket)
+            time.sleep(key_gap)
 
     # wait (briefly) for claude's confirmation line that the answer registered
     confirm_deadline = time.time() + max_wait
@@ -128,7 +142,8 @@ def _answer_one(session, pending, max_wait, poll, key_gap, socket=None):
     _log("no confirmation seen; moving on")
 
 
-def run(session, signal_dir, socket=None, max_wait=60.0, poll=0.3, key_gap=0.4):
+def run(session, signal_dir, socket=None, max_wait=60.0, poll=0.3, key_gap=0.8,
+        read_dwell=2.5):
     """Watch `signal_dir` for pending_q.json; for each, drive the on-screen
     selector. Stop when `<signal_dir>/.qmonitor_stop` appears. Never spins
     forever: every wait is bounded by max_wait."""
@@ -145,7 +160,7 @@ def run(session, signal_dir, socket=None, max_wait=60.0, poll=0.3, key_gap=0.4):
             _log(f"bad pending_q.json ({e}); removing")
             _safe_remove(pending_path)
             continue
-        _answer_one(session, pending, max_wait, poll, key_gap, socket)
+        _answer_one(session, pending, max_wait, poll, key_gap, socket, read_dwell)
         _safe_remove(pending_path)
 
 
@@ -165,8 +180,14 @@ def main():
                     help="dedicated tmux socket name (tmux -L <socket>)")
     ap.add_argument("--max-wait", type=float, default=60.0,
                     help="max seconds to wait on any single screen condition")
+    ap.add_argument("--read-dwell", type=float, default=2.5,
+                    help="seconds to dwell on each question before answering it "
+                         "(lets the viewer read it on the recording)")
+    ap.add_argument("--key-gap", type=float, default=0.8,
+                    help="seconds between keystrokes (highlight move is visible)")
     args = ap.parse_args()
-    run(args.session, args.signal_dir, socket=args.socket, max_wait=args.max_wait)
+    run(args.session, args.signal_dir, socket=args.socket, max_wait=args.max_wait,
+        key_gap=args.key_gap, read_dwell=args.read_dwell)
 
 
 if __name__ == "__main__":

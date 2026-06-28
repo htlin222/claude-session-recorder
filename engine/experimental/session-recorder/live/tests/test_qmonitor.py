@@ -52,3 +52,18 @@ def test_plan_two_questions_with_submit():
 def test_plan_wraps_legacy_single_signal():
     legacy = {"target_index": 1, "options": ["a", "b"]}   # old top-level shape
     assert qmonitor.plan_keystrokes(legacy) == ["Down", "Enter"]
+
+
+def test_plan_groups_one_per_question_plus_submit():
+    pending = {"questions": [
+        {"target_index": 0, "options": ["a", "b"]},
+        {"target_index": 1, "options": ["x", "y"]}]}
+    # one group per question (Q1 default, Q2 second), then a submit group
+    assert qmonitor.plan_groups(pending) == [["Enter"], ["Down", "Enter"], ["Enter"]]
+    # plan_keystrokes is the flattened groups
+    assert qmonitor.plan_keystrokes(pending) == ["Enter", "Down", "Enter", "Enter"]
+
+
+def test_plan_groups_single_question_no_submit_group():
+    pending = {"questions": [{"target_index": 1, "options": ["a", "b"]}]}
+    assert qmonitor.plan_groups(pending) == [["Down", "Enter"]]

@@ -9,13 +9,13 @@
     "intro": "我們用 claude 啟動一個互動式 session。",
     "outro": "稍候就進入它的互動畫面。"
   },
-  "close": "就算 Claude 一次問了好幾個問題，背景監看程式也會逐一在畫面上選好、最後送出，讓它接著完成。",
+  "close": "一次問好幾個問題，背景程式也會逐頁選好再送出。",
   "turns": [
     {
       "prompt": "Use the AskUserQuestion tool to ask me TWO things in one call: (1) which language, Python or Bash, and (2) what to name the file, greet or hello. Wait for both answers, then write the file in that language with that name and run it.",
       "intro": "這次故意讓它一次問兩個問題，看背景程式能不能逐頁回答再送出。",
-      "think": "它跳出兩頁選單；背景監看程式逐頁選好、切到下一頁，最後按下送出。",
-      "outro": "兩個問題都自動回答並送出後，它就把檔案寫出來並跑出結果。"
+      "think": "它跳出兩頁選單；背景程式逐頁選好、切到下一頁，最後按下送出。",
+      "outro": "兩頁都自動回答送出後，它就把檔案寫出來跑出結果。"
     }
   ]
 }
