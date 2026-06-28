@@ -109,6 +109,102 @@ right-panel == narration confirmed on the file-writing + text-Q&A + mixed
 scenario in `script.mixed.json`). v6's `detect_anchors.py` carries a verbatim copy
 of v5's `signals()`/`detect_turns()`, so nothing of the detection was lost.
 
+## Handling AskUserQuestion (interactive clarifications)
+`AskUserQuestion` is an **interactive-TUI-only** tool — it does not exist under
+`claude -p`. If the inner claude calls it mid-recording, the selector renders and
+**blocks waiting for a human**: the tape's `Wait+Screen /VHS_TURN_DONE_N/` times
+out, the Stop sentinel never prints, and the recording fails. These modules make a
+recorded session survive (and optionally *show*) the clarification.
+
+### Three approaches
+| Approach | What happens on screen | Drives | Use when |
+| --- | --- | --- | --- |
+| **`auto` (deny+answer)** — default, INVISIBLE, hang-proof | nothing; no selector ever paints | `autoanswer_questions.py` **denies** the tool at PreToolUse and feeds the chosen answer back as the deny *reason* → claude continues as if answered | you just need the recording not to hang and don't want to teach the ask |
+| **scripted-visible** (VHS-scripted) | the selector renders and the **tape** navigates `Down×N + Enter` | `gen_capture_tape.py` `question` beats + `autoanswer_questions.py` in `render` mode | the question is **known** ahead of time and you want the exact VHS visual of the ask + answer |
+| **robust** (tmux + bg-monitor) | the selector renders and `qmonitor.py` answers it live | `run_v6_tmux.sh`: claude runs inside an invisible tmux; `qmonitor.py` reads the live selector and answers **any** question (incl. unscripted + multi-question) | the question is **unknown** / unscripted, or multi-question — still a real VHS visual |
+
+Why deny-and-reason for `auto`: Claude Code hooks cannot inject a synthetic tool
+*result* at PreToolUse (only PostToolUse has `updatedToolOutput`, which fires too
+late). Denying with the answer in the reason is the only PreToolUse lever, and it
+keeps the selector off-screen entirely.
+
+### The hook — `autoanswer_questions.py`
+A **PreToolUse** hook wired on the `AskUserQuestion` matcher (see
+`claude_sandbox.sh`, which seeds `.claude/settings.json` with this hook *and*
+`timelog.py` on that matcher). Two modes via `$VHS_QUESTION_MODE`:
+
+- **`auto`** (default): emit a PreToolUse **deny** whose reason states the picked
+  answers (`"… Auto-answered on the user's behalf: <header> -> <label>; …"`).
+  Writes no signal file. Invisible, never hangs.
+- **`render`**: emit a PreToolUse **allow** so the selector paints, and write
+  `pending_q.json` into `$VHS_SIGNAL_DIR` describing **all** questions (header,
+  question, option labels, `target_index`, `target_label`, `multiSelect`) so an
+  external driver can answer them on screen.
+
+Answer choice is `target_index_for()`: an override is looked up by the question's
+`header`, then its `question` text, then the catch-all `"*"`; the override value
+is either an **int** / digit-string (that option *index* — wraps on negatives) or
+a **string** (exact label match, else case-insensitive substring). Falls back to
+option 0 (the first).
+
+### Config (env)
+| Var | Values | Effect |
+| --- | --- | --- |
+| `$VHS_QUESTION_MODE` | `auto` (default) \| `render` | deny+answer vs. allow+signal |
+| `$VHS_ANSWERS` | JSON object | per-question override: `header` / question-text / `"*"` → choice, where choice is an option **index** (int) or a **label substring** (string). E.g. `{"*":1}` forces the **2nd** option everywhere; `{"Auth method":"OAuth"}` picks by label. |
+| `$VHS_SIGNAL_DIR` | dir path | where `render` mode writes `pending_q.json` (defaults to cwd) |
+
+The `gen_capture_tape.py` `--tmux` path emits `Env VHS_QUESTION_MODE "render"`
+into the tape automatically when any turn has a `question` beat; `run_v6_tmux.sh`
+passes `VHS_QUESTION_MODE=render` + `VHS_ANSWERS` through the **real process env**
+when launching `vhs` (a VHS tape `Env` line can't escape the quotes in `{"*":0}`).
+
+A `question` beat in `script.json` (scripted-visible path):
+```json
+"turns": [ { "prompt": "…", "intro": "…", "think": "…", "outro": "…",
+             "question": { "answer_index": 1 } } ]
+```
+`answer_index` is **0-based** into the model's own options. The tape then emits
+`Wait+Screen /to navigate/` (the selector footer), a dwell, then `Down×N + Enter`.
+
+### The selector UI (from the spike)
+The live footer is `Enter to select · ↑/↓ to navigate · Esc to cancel`. Detection
+matches the plain-ASCII substring **`to navigate`** (`qnav.FOOTER_RE`) — the
+footer is the only VHS-safe anchor, because VHS's tape parser can't handle a
+literal `/` (no `\/` escape) nor the Unicode arrows `↑↓` inside a `Wait+Screen`
+regex. The highlighted row is led by `❯`, the header line by `☐`; claude always
+appends two synthetic rows (`Type something.`, `Chat about this`) which
+`qparse.py` excludes. A **multi-question** AskUserQuestion shows one `☐/☒` tab per
+question plus a `✔ Submit` tab and **auto-advances** to the next tab on each
+answer-`Enter`, so N questions = `Enter × (N+1)` for defaults (the trailing Enter
+hits Submit). A single question has no Submit tab — its answer-Enter closes it.
+
+`qmonitor.py` (`--socket` for a dedicated tmux server) computes the whole
+keystroke plan up front from `pending_q.json` (`plan_keystrokes`): `Down×target +
+Enter` per question, plus one trailing Enter to Submit when there's more than one.
+It waits for `FOOTER_RE` before sending and for `ANSWERED_RE`
+(`User answered Claude's questions`) after. `qparse.parse_selector()` reconciles
+the target by **label** against the on-screen order (robust to reordering).
+
+### Known limitation
+`multiSelect` questions are answered as a **single pick** — the `Space`-toggle of
+multiple options is **not yet implemented**. Both `qmonitor.plan_keystrokes` and
+the render-mode signal treat a `multiSelect` target as one `Down×target + Enter`.
+Tracked as a `TODO` in `qmonitor.py`.
+
+### Scenario scripts & how to run
+| Script | Path | Run with |
+| --- | --- | --- |
+| `script.question.json` | scripted-visible (known single question) | `run_v6.sh <demo> script.question.json` |
+| `script.robust.json` | robust (unscripted single question) | `run_v6_tmux.sh <demo> script.robust.json` |
+| `script.robust.multi.json` | robust (unscripted multi-question) | `run_v6_tmux.sh <demo> script.robust.multi.json` |
+
+`run_v6.sh` reaches `render` mode through the tape's auto-emitted
+`Env VHS_QUESTION_MODE "render"` (because the turn has a `question` beat) and the
+tape itself drives the keys. `run_v6_tmux.sh` films claude inside an invisible
+status-off tmux on a dedicated socket (`-L vhsq`) with a background `qmonitor.py`
+answering whatever appears; everything after capture is identical to `run_v6.sh`.
+
 ## How detection survives response-heavy multi-turn sessions
 Naively thresholding the input band breaks when a session has several file-writing
 turns: response output lingers in the band and a turn's typing merges with the
