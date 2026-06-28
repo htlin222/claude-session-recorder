@@ -19,7 +19,7 @@ spliced to fit the authored narration. No re-takes, no drift. MIT licensed.
 
 <sub>▶ **[Watch the full clip (MP4)](assets/demo.mp4)** — the launch lesson into Claude running Apple's `container` CLI (`script.container.json`). A mixed Claude session is shown below.</sub>
 
-![A narrated Claude Code session: terminal on the left, explainshell-style panel on the right](assets/session_panel.gif)
+![Claude does real work — writes a test, runs it — while the right panel fills with each Edit / Write / Bash action and the verified result](assets/session_panel.gif)
 
 ---
 
@@ -53,7 +53,8 @@ and the [sync-model evolution](../../../context/sync-model.md).
 - **External tools:**
   ```bash
   brew install vhs ffmpeg tmux imagemagick
-  pipx install edge-tts        # or: pipx install edge-tts; the package also pulls it as a dep
+  # edge-tts is pulled in as a Python dep by `pip install`, or grab it standalone:
+  pipx install edge-tts
   ```
 - **The Claude Code CLI** (`claude`) on your `PATH`.
 
