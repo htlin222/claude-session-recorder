@@ -35,11 +35,15 @@ import json
 import os
 import subprocess
 
+import qnav
+
 THEMES = {"dark": "Catppuccin Mocha", "light": "Catppuccin Latte"}
 PAD = 0.4          # fixed tiny soft pad around each action (no voice sizing)
 PRELUDE = 2.0      # Sleep before the launch typing (shell prompt settles)
 PRE_ENTER = 0.4    # beat after typing finishes, before Enter
 LBREATH = 0.5      # breath after each voice-paced launch token (== ledger BREATH)
+QSEE = 1.5         # dwell on the rendered AskUserQuestion selector (viewer reads it)
+QSTEP = 0.5        # beat between selector navigation keys (highlight move is visible)
 
 VOICE = "zh-TW-HsiaoChenNeural"
 RATE = "+0%"
@@ -105,6 +109,13 @@ def render(spec, demo, width, height, font_size, word_delay,
     a('Env PS1 "❯ "')
     a('Env PROMPT "❯ "')
     a(f'Env ZDOTDIR "{os.path.join(cfg, "zdotdir")}"')
+    # When a turn expects an AskUserQuestion, the tape must navigate a LIVE selector,
+    # so claude runs in render-mode (the hook lets the selector paint instead of
+    # auto-answering). Default stays "auto" (hang-proof) when no turn asks.
+    has_question = any(t.get("question") for t in turns)
+    if has_question:
+        a('Env VHS_QUESTION_MODE "render"')
+        a(f'Env VHS_SIGNAL_DIR "{os.path.abspath(demo)}"')
     a("")
     a(f"Sleep {PRELUDE:.0f}s                   # let the shell prompt settle")
     launch_plan = {"tokens": tokens, "base": base, "flags": flags}
@@ -159,13 +170,31 @@ def render(spec, demo, width, height, font_size, word_delay,
             a(f"Sleep {word_delay}ms")
         a(f"Sleep {PRE_ENTER:.3f}s          # beat before Enter")
         a("Enter")
+        turn_plan = {
+            "index": i, "prompt": t["prompt"], "sentinel": f"VHS_TURN_DONE_{i}",
+            "type_dur": type_dur,
+        }
+        question = t.get("question")
+        if question:
+            # WAIT for the live AskUserQuestion selector to paint (qnav.FOOTER_RE),
+            # then dwell so the viewer reads it, then NAVIGATE to the chosen option
+            # (Down/Up x delta) with a beat between keys so the highlight move is
+            # visible and a beat before the final Enter selects. THEN fall through to
+            # the sentinel wait. The footer `↑/↓ to navigate` is escaped for the VHS
+            # regex as `↑\/↓ to navigate` (the bare `/` would close the /.../).
+            a(f"Wait+Screen@{turn_to}s /↑\\/↓ to navigate/   "
+              "# AskUserQuestion selector appeared (footer: ↑/↓ to navigate)")
+            a(f"Sleep {QSEE:.3f}s   # dwell on the question (viewer reads it)")
+            keys = qnav.keys_to_select(question["answer_index"], 0)
+            for ki, key in enumerate(keys):
+                if ki > 0:
+                    a(f"Sleep {QSTEP:.3f}s   # beat so the highlight move is visible")
+                a(key)
+            turn_plan["question"] = {"answer_index": question["answer_index"]}
         a(f"Wait+Screen@{turn_to}s /VHS_TURN_DONE_{i}/   # HARD axis: real think gap")
         a(f"Sleep {PAD:.3f}s   # settle pad")
         a("")
-        plan["turns"].append({
-            "index": i, "prompt": t["prompt"], "sentinel": f"VHS_TURN_DONE_{i}",
-            "type_dur": type_dur,
-        })
+        plan["turns"].append(turn_plan)
     # teardown
     a("Sleep 500ms")
     a("Ctrl+C")

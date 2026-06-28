@@ -1,4 +1,5 @@
 import gen_capture_tape as g
+import qnav  # noqa  (ensure importable)
 
 SPEC = {
     "launch": {"base": "claude", "flags": [{"arg": "--model opus"}]},
@@ -69,3 +70,31 @@ def test_tape_overrides_inherited_prompt(tmp_path):
                            font_size=26, word_delay=220)
     assert 'Env PS1' in tape and 'Env PROMPT' in tape
     assert 'Env ZDOTDIR' in tape
+
+
+def test_question_turn_waits_for_selector_then_navigates(tmp_path):
+    spec = {
+        "launch": {"base": "claude", "flags": [{"arg": "--model opus"}]},
+        "turns": [{"prompt": "ask me to pick", "question": {"answer_index": 1}}],
+    }
+    tape, plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                          font_size=26, word_delay=220)
+    # after the prompt Enter: wait for the selector footer, then navigate, then sentinel
+    assert "↑/↓ to navigate" in tape           # Wait+Screen on the selector footer
+    i_wait = tape.index("↑/↓ to navigate")
+    i_down = tape.index("Down", i_wait)         # qnav: answer_index 1 -> one Down + Enter
+    i_done = tape.index("VHS_TURN_DONE_1")
+    assert i_wait < i_down < i_done
+    # the plan records the question for the downstream stages
+    assert plan["turns"][0]["question"]["answer_index"] == 1
+    # render-mode env so the hook lets the selector paint
+    assert 'Env VHS_QUESTION_MODE "render"' in tape
+
+
+def test_non_question_turn_has_no_selector_wait(tmp_path):
+    spec = {"launch": {"base": "claude", "flags": []},
+            "turns": [{"prompt": "just do it"}]}
+    tape, _ = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                       font_size=26, word_delay=220)
+    assert "↑/↓ to navigate" not in tape
+    assert 'VHS_QUESTION_MODE' not in tape
