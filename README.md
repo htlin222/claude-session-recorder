@@ -1,5 +1,31 @@
 # vhs-demo — narrated, sync-verified terminal teaching videos
 
+## ⭐ `claude-session-recorder` — record narrated videos of a *real* Claude Code session
+
+[![CI](https://github.com/htlin222/claude-session-recorder/actions/workflows/test.yml/badge.svg)](https://github.com/htlin222/claude-session-recorder/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
+![Tests](https://img.shields.io/badge/tests-98%20passing-brightgreen.svg)
+
+![Demo: Claude runs Apple's container CLI in a micro Linux env — terminal + panel + narration](engine/experimental/session-recorder/live/assets/demo.gif)
+
+Films a real `claude` TUI session **once**, then freeze-frame splices the static
+stretches to fit an authored voice that **leads** the typing — a deterministic
+1920×1080 video where the **terminal, the explainshell-style panel, and the voice
+stay in lock-step**. It even drives Claude's interactive **AskUserQuestion**
+selector on screen. Single `ledger.json` source of truth; a deterministic lint gate.
+
+```bash
+pip install -e engine/experimental/session-recorder/live
+record-session /tmp/demo engine/experimental/session-recorder/live/script.example.json
+# → /tmp/demo/session_panel.mp4
+```
+
+**→ Full docs, quickstart & architecture: [`engine/experimental/session-recorder/live/`](engine/experimental/session-recorder/live/)**
+
+---
+
 ## Goal
 Turn terminal activity into a polished 1920×1080 teaching video: a real terminal
 on the **left**, an explainshell-style panel on the **right**, one continuous
