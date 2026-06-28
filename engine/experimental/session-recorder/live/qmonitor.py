@@ -34,31 +34,38 @@ def decide_keystrokes(pending, parsed):
     return qnav.keys_to_select(idx, parsed.get("highlight", 0))
 
 
-def capture(session):
+def _tmux_argv(socket, *args):
+    """The tmux argv, prepending `-L <socket>` when `socket` is set. Pure: the
+    tmux mode uses a DEDICATED socket (`-L vhsq`) so it never collides with the
+    user's default tmux server (which also breaks env inheritance)."""
+    return ["tmux"] + (["-L", socket] if socket else []) + list(args)
+
+
+def capture(session, socket=None):
     """The current tmux pane text for `session`."""
     return subprocess.run(
-        ["tmux", "capture-pane", "-p", "-t", session],
+        _tmux_argv(socket, "capture-pane", "-p", "-t", session),
         capture_output=True, text=True,
     ).stdout
 
 
-def send(session, key):
+def send(session, key, socket=None):
     """send-keys one key (e.g. 'Down', 'Enter') to the tmux `session`."""
-    subprocess.run(["tmux", "send-keys", "-t", session, key])
+    subprocess.run(_tmux_argv(socket, "send-keys", "-t", session, key))
 
 
 def _log(msg):
     print(f"[qmonitor] {msg}", file=sys.stderr, flush=True)
 
 
-def _answer_one(session, pending, max_wait, poll, key_gap):
+def _answer_one(session, pending, max_wait, poll, key_gap, socket=None):
     """Wait for the selector, send the reconciled keystrokes, wait for the
     confirmation line. Guards every wait with max_wait so it never hangs."""
     # poll the pane until the selector is live (or give up)
     deadline = time.time() + max_wait
     parsed = None
     while time.time() < deadline:
-        parsed = qparse.parse_selector(capture(session))
+        parsed = qparse.parse_selector(capture(session, socket))
         if parsed.get("showing"):
             break
         time.sleep(poll)
@@ -69,20 +76,20 @@ def _answer_one(session, pending, max_wait, poll, key_gap):
     keys = decide_keystrokes(pending, parsed)
     _log(f"selecting {pending.get('target_label')!r} via {keys}")
     for key in keys:
-        send(session, key)
+        send(session, key, socket)
         time.sleep(key_gap)  # let the highlight move be visible on the recording
 
     # wait (briefly) for claude's confirmation line that the answer registered
     confirm_deadline = time.time() + max_wait
     while time.time() < confirm_deadline:
-        if qnav.ANSWERED_RE and re.search(qnav.ANSWERED_RE, capture(session)):
+        if qnav.ANSWERED_RE and re.search(qnav.ANSWERED_RE, capture(session, socket)):
             _log("answer confirmed")
             return
         time.sleep(poll)
     _log("no confirmation seen; moving on")
 
 
-def run(session, signal_dir, max_wait=60.0, poll=0.3, key_gap=0.4):
+def run(session, signal_dir, socket=None, max_wait=60.0, poll=0.3, key_gap=0.4):
     """Watch `signal_dir` for pending_q.json; for each, drive the on-screen
     selector. Stop when `<signal_dir>/.qmonitor_stop` appears. Never spins
     forever: every wait is bounded by max_wait."""
@@ -99,7 +106,7 @@ def run(session, signal_dir, max_wait=60.0, poll=0.3, key_gap=0.4):
             _log(f"bad pending_q.json ({e}); removing")
             _safe_remove(pending_path)
             continue
-        _answer_one(session, pending, max_wait, poll, key_gap)
+        _answer_one(session, pending, max_wait, poll, key_gap, socket)
         _safe_remove(pending_path)
 
 
@@ -115,10 +122,12 @@ def main():
     ap.add_argument("--session", required=True, help="tmux session/target")
     ap.add_argument("--signal-dir", required=True,
                     help="dir where the hook writes pending_q.json")
+    ap.add_argument("--socket", default=None,
+                    help="dedicated tmux socket name (tmux -L <socket>)")
     ap.add_argument("--max-wait", type=float, default=60.0,
                     help="max seconds to wait on any single screen condition")
     args = ap.parse_args()
-    run(args.session, args.signal_dir, max_wait=args.max_wait)
+    run(args.session, args.signal_dir, socket=args.socket, max_wait=args.max_wait)
 
 
 if __name__ == "__main__":

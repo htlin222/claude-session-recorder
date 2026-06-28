@@ -25,3 +25,12 @@ def test_falls_back_to_target_index_if_label_absent():
 
 def test_no_keys_when_not_showing():
     assert qmonitor.decide_keystrokes({"target_index": 0}, {"showing": False}) == []
+
+
+def test_tmux_argv_with_socket():
+    assert qmonitor._tmux_argv("vhsq", "capture-pane", "-p", "-t", "s") == \
+        ["tmux", "-L", "vhsq", "capture-pane", "-p", "-t", "s"]
+
+
+def test_tmux_argv_without_socket():
+    assert qmonitor._tmux_argv(None, "send-keys") == ["tmux", "send-keys"]

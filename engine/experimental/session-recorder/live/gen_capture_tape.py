@@ -64,7 +64,7 @@ def _dur(path):
 
 def render(spec, demo, width, height, font_size, word_delay,
            startup_to=60, turn_to=120, theme="Catppuccin Mocha",
-           launch_voice=None, launch_outro=None):
+           launch_voice=None, launch_outro=None, tmux=None):
     """Pure: build (tape_str, plan) from spec. Writes NOTHING to disk.
 
     `launch_voice` (optional): a list of `{token, text, mp3, dur}` for the
@@ -74,7 +74,16 @@ def render(spec, demo, width, height, font_size, word_delay,
     WITH the narration instead of being freeze-extended for ~15s. The launch is
     the deterministic shell region (it runs before `claude` exists, so there is
     no nondeterministic think gap), so sizing it to the voice here is safe.
-    When None, the legacy fixed-PAD path is used (unit tests / back-compat)."""
+    When None, the legacy fixed-PAD path is used (unit tests / back-compat).
+
+    `tmux` (optional): `{"socket": <name>, "name": <session>}`. When set, the
+    WHOLE claude session is filmed INSIDE a dedicated-socket, status-off tmux
+    (a robustness safety net: a bg `qmonitor.py` can answer ANY on-screen
+    AskUserQuestion). The tmux START is emitted INVISIBLY (Hide…Show) BEFORE the
+    launch, so the recording resumes on a clean in-pane shell prompt and the
+    flag-by-flag CLI lesson (`Type "claude --flags"`) is preserved untouched.
+    The answer policy (VHS_ANSWERS) is NEVER a tape Env — it can carry chars VHS
+    cannot parse, so the driver passes it via the real process env instead."""
     turns = spec["turns"]
     cfg = os.path.join(os.path.abspath(demo), ".cfg")
     timeline = os.path.join(os.path.abspath(demo), "session-timeline.jsonl")
@@ -117,6 +126,20 @@ def render(spec, demo, width, height, font_size, word_delay,
         a('Env VHS_QUESTION_MODE "render"')
         a(f'Env VHS_SIGNAL_DIR "{os.path.abspath(demo)}"')
     a("")
+    if tmux:
+        # tmux MODE: start the dedicated-socket, status-off tmux INVISIBLY so the
+        # recording resumes on a clean in-pane shell prompt. The Env lines above
+        # are inherited by `exec $SHELL` here, so the in-tmux prompt stays clean,
+        # and the launch typing below runs INSIDE this pane (CLI lesson preserved).
+        sock, name = tmux["socket"], tmux["name"]
+        conf = os.path.join(os.path.abspath(demo), "tmux.conf")
+        a("Hide")
+        a(f'Type "tmux -L {sock} -f {conf} new-session -A -s {name} '
+          "'exec $SHELL'\"")
+        a("Enter")
+        a("Sleep 800ms")
+        a("Show")
+        a("")
     a(f"Sleep {PRELUDE:.0f}s                   # let the shell prompt settle")
     launch_plan = {"tokens": tokens, "base": base, "flags": flags}
     if launch_voice:
@@ -219,6 +242,11 @@ def main():
     ap.add_argument("--word-delay", type=int, default=220, help="ms between prompt words")
     ap.add_argument("--startup-timeout", type=int, default=60)
     ap.add_argument("--turn-timeout", type=int, default=120)
+    ap.add_argument("--tmux", action="store_true",
+                    help="film the session INSIDE a dedicated-socket tmux "
+                         "(a bg qmonitor.py answers any on-screen question)")
+    ap.add_argument("--tmux-socket", default="vhsq",
+                    help="dedicated tmux socket/session name for --tmux")
     args = ap.parse_args()
     spec = json.load(open(args.script, encoding="utf-8"))
     tape_path = args.output or os.path.join(args.demo, "session.tape")
@@ -250,10 +278,11 @@ def main():
             launch_outro = {"text": outro_txt, "mp3": os.path.relpath(om, args.demo),
                             "dur": round(synth(outro_txt, om), 3)}
 
+    tmux = {"socket": args.tmux_socket, "name": args.tmux_socket} if args.tmux else None
     tape, plan = render(spec, args.demo, args.width, args.height, args.font_size,
                         args.word_delay, args.startup_timeout, args.turn_timeout,
                         THEMES[args.theme], launch_voice=launch_voice,
-                        launch_outro=launch_outro)
+                        launch_outro=launch_outro, tmux=tmux)
     open(tape_path, "w").write(tape)
     json.dump(plan, open(os.path.join(args.demo, "capture.json"), "w"),
               ensure_ascii=False, indent=2)

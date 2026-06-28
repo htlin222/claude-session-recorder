@@ -100,3 +100,33 @@ def test_non_question_turn_has_no_selector_wait(tmp_path):
                        font_size=26, word_delay=220)
     assert qnav.FOOTER_RE not in tape
     assert 'VHS_QUESTION_MODE' not in tape
+
+
+def test_tmux_mode_starts_an_invisible_tmux_before_launch(tmp_path):
+    # tmux mode: the whole claude session runs inside a dedicated-socket,
+    # status-off tmux. The tmux START must be INVISIBLE (Hide ... Show) and must
+    # come BEFORE the CLI-lesson launch so `Type "claude"` is preserved on screen.
+    tape, _plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                           font_size=26, word_delay=220,
+                           tmux={"socket": "vhsq", "name": "vhsq"})
+    assert "Hide" in tape and "Show" in tape
+    assert "tmux -L vhsq" in tape
+    # the Hide/tmux/Show block is BEFORE the first claude launch token
+    i_hide = tape.index("Hide")
+    i_tmux = tape.index("tmux -L vhsq")
+    i_show = tape.index("Show")
+    i_claude = tape.index('Type "claude"')
+    assert i_hide < i_tmux < i_show < i_claude
+    # references the driver-written tmux.conf and the socket-named session
+    assert "tmux.conf" in tape and "-s vhsq" in tape
+    # the answer policy is NEVER a tape Env (the driver passes it via process env)
+    assert "VHS_ANSWERS" not in tape
+
+
+def test_non_tmux_render_has_no_hide_or_tmux(tmp_path):
+    # back-compat: without tmux config the tape is byte-identical to before —
+    # no Hide/Show, no dedicated-socket tmux start.
+    tape, _ = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                       font_size=26, word_delay=220)
+    assert "Hide" not in tape
+    assert "tmux -L" not in tape
