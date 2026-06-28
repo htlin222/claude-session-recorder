@@ -58,3 +58,6 @@ engine/experimental/session-recorder/_seg/
 build/
 dist/
 .pytest_cache/
+
+# the README hero clip is an intentional committed asset
+!engine/experimental/session-recorder/live/assets/*.mp4
