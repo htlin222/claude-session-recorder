@@ -43,9 +43,9 @@ dev = ["pytest>=8"]
 record-session = "record:main"
 
 [project.urls]
-# NOTE: placeholder GitHub URL — update on real open-source publish.
 Homepage = "https://github.com/htlin222/claude-session-recorder"
 Repository = "https://github.com/htlin222/claude-session-recorder"
+Issues = "https://github.com/htlin222/claude-session-recorder/issues"
 
 [tool.setuptools]
 # Flat layout: the package is a set of top-level modules in this directory.

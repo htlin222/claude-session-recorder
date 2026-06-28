@@ -1,5 +1,11 @@
 # claude-session-recorder
 
+[![CI](https://github.com/htlin222/claude-session-recorder/actions/workflows/test.yml/badge.svg)](https://github.com/htlin222/claude-session-recorder/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
+![Tests](https://img.shields.io/badge/tests-98%20passing-brightgreen.svg)
+
 **Record a narrated, sync-verified teaching video of a *real* Claude Code TUI
 session.** You write a short JSON script (the prompts + what to say); the tool
 films an actual `claude` session, lays an explainshell-style panel on the right,
