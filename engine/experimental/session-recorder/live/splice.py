@@ -11,6 +11,7 @@ import subprocess
 import numpy as np
 
 from ledger import load, save
+from strategies import strategy_for
 
 FF = "/opt/homebrew/bin/ffmpeg"
 FPS = 12.5
@@ -87,22 +88,12 @@ def reconcile(led, realized_durs):
 
 
 def plan(segments):
-    """Per ledger segment -> ffmpeg op(s). HARD/BOOT copy verbatim; a BOOT whose
-    out_dur exceeds its raw length gets an extra end-freeze of the remainder; SOFT
-    becomes a single-frame freeze held for out_dur."""
+    """Per ledger segment -> ffmpeg op(s), dispatched through the SegmentStrategy
+    registry (strategies.py). HARD/BOOT copy verbatim (BOOT end-freezes any
+    out_dur beyond its captured length); SOFT freezes one static frame for out_dur."""
     ops = []
     for s in segments:
-        raw_len = s["raw"][1] - s["raw"][0]
-        if s["kind"] in ("hard", "boot"):
-            ops.append({"op": "copy", "raw": list(s["raw"])})
-            if s["kind"] == "boot":
-                extra = round(s.get("out_dur", raw_len) - raw_len, 3)
-                if extra > 0.01:
-                    ops.append({"op": "freeze", "raw": list(s["raw"]),
-                                "at": "end", "out_dur": extra})
-        else:  # soft
-            ops.append({"op": "freeze", "raw": list(s["raw"]),
-                        "out_dur": round(s.get("out_dur", raw_len), 3)})
+        ops.extend(strategy_for(s).splice_ops(s))
     return ops
 
 
