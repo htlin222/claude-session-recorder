@@ -1,4 +1,42 @@
+import numpy as np
+
 import detect_anchors as da
+
+
+def test_detect_turns_guided_drops_spinner_peaks():
+    # A real recording read a 2-turn demo as 5 submissions: each turn's true
+    # typing peak (input box FILLED, ~near max) was flanked by SECONDARY peaks
+    # from the streaming-response spinner leaking into the band (moderately
+    # bright, > half-max). Guided selection must keep the 2 STRONGEST (real)
+    # peaks and drop the spinner ones — not raise on the 5-vs-2 mismatch.
+    inp = np.zeros(90)
+    inp[10:14] = 400.0   # turn 1 typing (box filled)
+    inp[25:29] = 250.0   # spinner after turn 1 (leaks above half-max=200)
+    inp[45:49] = 390.0   # turn 2 typing (box filled)
+    inp[60:64] = 300.0   # spinner
+    inp[75:79] = 220.0   # spinner
+    full = np.full(90, 100.0)
+    turns = [{"type_dur": 0.5}, {"type_dur": 0.5}]
+    out = da.detect_turns(full, inp, n=2, turns=turns, pre_enter=0.4)
+    assert len(out) == 2
+    submits = [round(t["submit"], 2) for t in out]
+    # the two TALL peaks end at frames 14 and 49 -> 14/12.5=1.12, 49/12.5=3.92
+    assert submits == [1.12, 3.92]
+    # the spinner submits (29,64,79 /12.5 = 2.32/5.12/6.32) are NOT selected
+    assert 2.32 not in submits and 5.12 not in submits
+
+
+def test_detect_turns_raises_when_fewer_than_n():
+    # FEWER groups than expected is a genuine miss — still raise (guided only
+    # trims an OVERSHOOT, it never invents submissions).
+    inp = np.zeros(60)
+    inp[10:14] = 400.0
+    full = np.full(60, 100.0)
+    try:
+        da.detect_turns(full, inp, n=2, turns=[{"type_dur": 0.5}] * 2, pre_enter=0.4)
+        assert False, "expected SystemExit on under-detection"
+    except SystemExit:
+        pass
 
 
 def test_raw_segments_boot_then_alternating_soft_hard():

@@ -89,6 +89,17 @@ def detect_turns(full, inp, n, turns, pre_enter):
             i = j
         else:
             i += 1
+    # GUIDED selection: some response content (a streaming spinner / answer line)
+    # can leak a SECONDARY peak into the tight band that clears half-max, so a turn
+    # yields >1 group and the blind count overshoots (measured: a 2-turn demo read
+    # as 5). We always KNOW n, so when there are MORE than n groups keep the n with
+    # the STRONGEST peak — a real submission FILLS the input box to near-max while
+    # spinner/response leakage peaks lower — back in temporal order. A count BELOW
+    # n is still a genuine detection miss and raises.
+    if len(groups) > n:
+        strongest = sorted(groups, key=lambda g: float(inp[g[0]:g[1]].max()),
+                           reverse=True)[:n]
+        groups = sorted(strongest, key=lambda g: g[0])
     if len(groups) != n:
         raise SystemExit(f"detected {len(groups)} prompt submissions, expected {n}. "
                          f"Tune the input band / thresholds, or the recording differs.")
