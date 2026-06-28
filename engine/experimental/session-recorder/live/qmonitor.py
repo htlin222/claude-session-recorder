@@ -40,21 +40,60 @@ def plan_keystrokes(pending):
 
     Pure; the on-screen order matches the hook's tool_input order and the
     auto-advance is deterministic, so the whole plan is computable from the
-    signal alone. multiSelect is not yet exercised by the spike."""
+    signal alone. A single multiSelect question is handled by plan_groups via
+    _multiselect_keys (Space-toggle + Submit-tab commit)."""
     return [k for group in plan_groups(pending) for k in group]
+
+
+def _multiselect_keys(target_indices):
+    """The key sequence to drive a SINGLE multiSelect question: Space-TOGGLE each
+    target option, then commit via the Submit tab (Right, Enter).
+
+    A multiSelect question renders per-option checkboxes; `Space` toggles the
+    HIGHLIGHTED option (and does NOT move the highlight), `Down`/`Up` navigate.
+    Starting at cursor 0, for each target in SORTED order we move the cursor to it
+    (Down/Up × delta) and `Space`; the cursor stays put after Space, so we track
+    it across toggles. Finally `Right` switches to the `✔ Submit` tab (default-
+    highlighted "Submit answers") and `Enter` finalizes."""
+    keys = []
+    cursor = 0
+    for idx in sorted(target_indices):
+        delta = idx - cursor
+        key = "Down" if delta > 0 else "Up"
+        keys += [key] * abs(delta)
+        keys.append("Space")
+        cursor = idx
+    keys += ["Right", "Enter"]  # switch to Submit tab, then finalize
+    return keys
+
+
+def _targets(question):
+    """The list of option indices to select for a question — target_indices when
+    present (multiSelect), else the single target_index wrapped."""
+    return question.get("target_indices") or [question.get("target_index", 0)]
 
 
 def plan_groups(pending):
     """Like plan_keystrokes but GROUPED: one key-group per question, plus a final
-    one-Enter Submit group when there is more than one question. The monitor
-    dwells BETWEEN groups (each Enter auto-advances to a fresh tab) so the viewer
-    can read each question before it is answered on the recording."""
+    one-Enter Submit group when there is more than one (single-select) question.
+    The monitor dwells BETWEEN groups (each Enter auto-advances to a fresh tab) so
+    the viewer can read each question before it is answered on the recording.
+
+    A single multiSelect question is one group: Space-toggle every target then
+    commit via the Submit tab (see _multiselect_keys)."""
     questions = _as_questions(pending)
+    # Spiked case: a single multiSelect question — toggle + Submit-tab commit.
+    if len(questions) == 1 and questions[0].get("multiSelect"):
+        return [_multiselect_keys(_targets(questions[0]))]
     groups = []
     for q in questions:
-        # TODO multiSelect: Space-toggle each picked option before Enter; for now
-        # treat a multiSelect question's target as a single pick (Down×target + Enter).
-        groups.append(qnav.keys_to_select(q.get("target_index", 0), 0))
+        if q.get("multiSelect"):
+            # TODO multiSelect within multi-question (not spiked): a multiSelect
+            # mixed with other questions isn't handled — fall back to a single
+            # pick of its first target so the run doesn't break.
+            groups.append(qnav.keys_to_select(_targets(q)[0], 0))
+        else:
+            groups.append(qnav.keys_to_select(q.get("target_index", 0), 0))
     if len(questions) > 1:
         groups.append(["Enter"])  # Submit tab
     return groups

@@ -183,12 +183,19 @@ typed and run.
 
 - **Experimental.** This is the `live/` capture path of the broader
   session-recorder; APIs and file layout may change.
-- **`multiSelect` is answered as a single pick.** The `Space`-toggle of multiple
-  options is not yet implemented (TODO in `qmonitor.py`); a `multiSelect` target is
-  treated as one `Down×target + Enter`.
+- **`multiSelect` is supported for a single `multiSelect` question.** The driver
+  `Space`-toggles each chosen option (tracking the highlight, which `Space` does not
+  move) and commits via the `✔ Submit` tab (`Right`, `Enter`). Choose which options to
+  check with `VHS_ANSWERS` (a list, e.g. `{"*":[0,2]}` or `{"Topics":["beta","delta"]}`;
+  a bare int/str checks one option; the default is the first option). **Remaining TODO:**
+  a `multiSelect` question *mixed within a multi-question* call is not yet handled — such
+  a question falls back to a single pick of its first target (see the TODO in
+  `qmonitor.py`).
 - **The live capture is non-deterministic.** The *editing* is deterministic, but the
   one `claude` run can flake (model unavailability, an unexpected tool call) — if a
-  take fails, re-run. The post-capture pipeline never re-runs `claude`.
+  take fails, re-run. `record-session --retries N` re-runs the capture automatically up
+  to `N` more times when it produces no `terminal_raw.mp4`. The post-capture pipeline
+  never re-runs `claude`.
 - **macOS-only capture** (VHS + the sandbox assume macOS / Apple Silicon).
 
 ---

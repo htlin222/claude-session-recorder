@@ -87,6 +87,26 @@ def _capture_env(demo: Path, *, answers: str | None = None, robust: bool = False
     return env
 
 
+def _capture_with_retries(demo: Path, capture_fn, retries: int) -> None:
+    """Run `capture_fn` (gen_capture_tape + vhs) once; if it produced no
+    `<demo>/terminal_raw.mp4` (the inner claude can exit early — intermittently
+    flaky), RE-RUN up to `retries` more times before failing. The sandbox is
+    idempotent, so re-running the capture is safe. Each retry is logged."""
+    raw = demo / "terminal_raw.mp4"
+    capture_fn()
+    attempt = 0
+    while not raw.exists() and attempt < retries:
+        attempt += 1
+        print(f"-- retry capture {attempt}/{retries}: {raw.name} missing, "
+              "re-running gen_capture_tape + vhs", flush=True)
+        capture_fn()
+    if not raw.exists():
+        print(f"\n!! capture FAILED: {raw} still missing after "
+              f"{retries} retr{'y' if retries == 1 else 'ies'}",
+              file=sys.stderr, flush=True)
+        sys.exit(1)
+
+
 def _wipe_timeline():
     """rip -f the shared SR/session-timeline.jsonl before vhs (idempotent)."""
     tl = SR / "session-timeline.jsonl"
@@ -114,20 +134,25 @@ def run_standard(demo: Path, script: Path, args) -> None:
     print("== v6 pipeline ==", flush=True)
     # Phase 0a — isolated sandbox (idempotent)
     _run(["bash", LIVE / "claude_sandbox.sh", demo], stage="sandbox")
-    # Phase 0b — minimal capture tape + capture.json (no voice)
-    _run([
-        PY, LIVE / "gen_capture_tape.py",
-        "--demo", demo, "--script", script,
-        "--width", args.width, "--height", args.height, "--font-size", args.font_size,
-        "-o", demo / "session.tape",
-    ], stage="gen_capture_tape")
-    # Phase 0c — film the real TUI ONCE (claude launches here, and ONLY here).
-    _wipe_timeline()
-    env = _capture_env(demo, answers=args.answers, robust=False)
-    _run(
-        ["vhs", "session.tape"], stage="vhs (capture)", env=env, cwd=demo,
-        hint=f"inspect the vhs output above and the tape at {demo / 'session.tape'}",
-    )
+
+    def _capture():
+        # Phase 0b — minimal capture tape + capture.json (no voice)
+        _run([
+            PY, LIVE / "gen_capture_tape.py",
+            "--demo", demo, "--script", script,
+            "--width", args.width, "--height", args.height, "--font-size", args.font_size,
+            "-o", demo / "session.tape",
+        ], stage="gen_capture_tape")
+        # Phase 0c — film the real TUI ONCE (claude launches here, and ONLY here).
+        _wipe_timeline()
+        env = _capture_env(demo, answers=args.answers, robust=False)
+        _run(
+            ["vhs", "session.tape"], stage="vhs (capture)", env=env, cwd=demo,
+            hint=f"inspect the vhs output above and the tape at {demo / 'session.tape'}",
+        )
+
+    # Re-run the capture if it produced no terminal_raw.mp4 (flaky inner claude).
+    _capture_with_retries(demo, _capture, args.retries)
     # Phase 1..3 — author/splice/overlay/panel/lint
     _post_capture(demo, script)
 
@@ -139,19 +164,6 @@ def run_robust(demo: Path, script: Path, args) -> None:
     _run(["bash", LIVE / "claude_sandbox.sh", demo], stage="sandbox")
     # Phase 0a' — status-off tmux config so the rendered pane shows NO tmux chrome.
     (demo / "tmux.conf").write_text(TMUX_CONF)
-    # Phase 0b — tmux-mode capture tape (the whole session runs inside tmux -L vhsq)
-    _run([
-        PY, LIVE / "gen_capture_tape.py",
-        "--demo", demo, "--script", script,
-        "--tmux", "--tmux-socket", TMUX_SOCKET,
-        "--width", args.width, "--height", args.height, "--font-size", args.font_size,
-        "-o", demo / "session.tape",
-    ], stage="gen_capture_tape")
-    # Phase 0c — film the real TUI ONCE inside tmux. claude launches here, ONLY here.
-    _wipe_timeline()
-    # Clean slate on our PRIVATE socket (never touches the user's default server).
-    subprocess.call(["tmux", "-L", TMUX_SOCKET, "kill-server"],
-                    stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     # Background safety net: qmonitor drives the on-screen selector for ANY question.
     qlog_path = demo / "qmonitor.log"
     qlog = open(qlog_path, "w")
@@ -162,12 +174,30 @@ def run_robust(demo: Path, script: Path, args) -> None:
         stdout=qlog, stderr=subprocess.STDOUT,
     )
     print(f"-- qmonitor: background pid {monitor.pid} -> {qlog_path}", flush=True)
-    try:
+
+    def _capture():
+        # Phase 0b — tmux-mode capture tape (whole session runs inside tmux -L vhsq)
+        _run([
+            PY, LIVE / "gen_capture_tape.py",
+            "--demo", demo, "--script", script,
+            "--tmux", "--tmux-socket", TMUX_SOCKET,
+            "--width", args.width, "--height", args.height, "--font-size", args.font_size,
+            "-o", demo / "session.tape",
+        ], stage="gen_capture_tape")
+        # Phase 0c — film the real TUI ONCE inside tmux. claude launches here, ONLY here.
+        _wipe_timeline()
+        # Clean slate on our PRIVATE socket (never touches the user's default server).
+        subprocess.call(["tmux", "-L", TMUX_SOCKET, "kill-server"],
+                        stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         env = _capture_env(demo, answers=args.answers, robust=True)
         _run(
             ["vhs", "session.tape"], stage="vhs (capture)", env=env, cwd=demo,
             hint=f"inspect the vhs output above and the monitor log at {qlog_path}",
         )
+
+    try:
+        # Re-run the capture if it produced no terminal_raw.mp4 (flaky inner claude).
+        _capture_with_retries(demo, _capture, args.retries)
     finally:
         # Stop the monitor and tear down our private tmux server.
         (demo / ".qmonitor_stop").touch()
@@ -199,6 +229,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--answers", default=None, metavar="JSON",
                    help='auto-answer policy passed via VHS_ANSWERS, e.g. \'{"*":1}\' '
                         '(robust default: {"*":0} = first option for unknown Qs)')
+    p.add_argument("--retries", type=int, default=1, metavar="N",
+                   help="if <demo>/terminal_raw.mp4 is missing after the vhs "
+                        "capture (flaky inner claude can exit early), re-run the "
+                        "capture (gen_capture_tape + vhs) up to N more times "
+                        "before failing (default: 1)")
     p.add_argument("--width", type=int, default=1200, help="capture width (px)")
     p.add_argument("--height", type=int, default=1080, help="capture height (px)")
     p.add_argument("--font-size", type=int, default=26, help="capture font size (px)")

@@ -88,6 +88,50 @@ def test_render_mode_emits_all_questions(tmp_path):
     assert rec["questions"][1]["target_label"] == "main.py"
 
 
+def test_target_indices_single_select_default():
+    assert aq.target_indices_for(Q["questions"][0], {}) == [0]
+
+
+def test_target_indices_single_select_override():
+    assert aq.target_indices_for(Q["questions"][0], {"*": 1}) == [1]
+
+
+MS = {"question": "Pick some", "header": "Topics", "multiSelect": True,
+      "options": [{"label": "alpha"}, {"label": "beta"},
+                  {"label": "gamma"}, {"label": "delta"}]}
+
+
+def test_target_indices_multiselect_default_first():
+    assert aq.target_indices_for(MS, {}) == [0]
+
+
+def test_target_indices_multiselect_list_of_ints():
+    assert aq.target_indices_for(MS, {"*": [0, 2]}) == [0, 2]
+
+
+def test_target_indices_multiselect_list_of_labels():
+    assert aq.target_indices_for(MS, {"Topics": ["beta", "delta"]}) == [1, 3]
+
+
+def test_target_indices_multiselect_single_int_wrapped():
+    assert aq.target_indices_for(MS, {"*": 2}) == [2]
+
+
+def test_render_mode_emits_target_indices_default(tmp_path):
+    data = {"tool_input": {"questions": Q["questions"]}}
+    aq.handle(data, answers={}, mode="render", signal_dir=str(tmp_path))
+    rec = json.loads((tmp_path / "pending_q.json").read_text())
+    assert rec["questions"][0]["target_indices"] == [0]
+
+
+def test_render_mode_multiselect_emits_target_indices(tmp_path):
+    data = {"tool_input": {"questions": [MS]}}
+    aq.handle(data, answers={"*": [0, 2]}, mode="render", signal_dir=str(tmp_path))
+    rec = json.loads((tmp_path / "pending_q.json").read_text())
+    assert rec["questions"][0]["target_indices"] == [0, 2]
+    assert rec["questions"][0]["multiSelect"] is True
+
+
 def test_auto_mode_handle_denies(tmp_path):
     out = aq.handle({"tool_input": {"questions": Q["questions"]}}, answers={}, mode="auto", signal_dir=str(tmp_path))
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"

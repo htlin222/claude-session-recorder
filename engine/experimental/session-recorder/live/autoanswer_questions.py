@@ -65,6 +65,55 @@ def target_index_for(question, answers):
     return 0
 
 
+def _indices_for_entry(entry, labels):
+    """All option indices a single override entry resolves to, against `labels`.
+    int (or digit string) -> that one index (negatives wrap, out-of-range dropped).
+    str -> every label that equals it, else every label that contains it
+    (case-insensitive) — the same matching as target_index_for, but returning ALL
+    matches so a multiSelect can check several look-alike options at once."""
+    if isinstance(entry, int) or (isinstance(entry, str) and entry.lstrip("-").isdigit()):
+        idx = int(entry)
+        if -len(labels) <= idx < len(labels):
+            return [idx % len(labels)]
+        return []
+    if isinstance(entry, str):
+        exact = [i for i, lab in enumerate(labels) if lab == entry]
+        if exact:
+            return exact
+        return [i for i, lab in enumerate(labels) if entry.lower() in lab.lower()]
+    return []
+
+
+def target_indices_for(question, answers):
+    """The LIST of 0-based option indices to select for a question. Pure — unit
+    tested.
+
+    Single-select: [target_index_for(question, answers)] (one pick).
+    multiSelect: the options to CHECK. Defaults to [0] (the first option). An
+      override (looked up by header, then question text, then "*") may be:
+        * a LIST -> each entry mapped via _indices_for_entry, de-duped in order,
+        * a single int/str -> wrapped as a one-element list.
+      An override that resolves to nothing falls back to [0]."""
+    labels = _labels(question)
+    if not labels:
+        return []
+    if not question.get("multiSelect"):
+        ti = target_index_for(question, answers)
+        return [ti] if ti is not None else []
+    override = (answers.get(question.get("header"))
+               or answers.get(question.get("question"))
+               or answers.get("*"))
+    if override is None:
+        return [0]
+    entries = override if isinstance(override, list) else [override]
+    indices = []
+    for entry in entries:
+        for i in _indices_for_entry(entry, labels):
+            if i not in indices:
+                indices.append(i)
+    return indices or [0]
+
+
 def _labels(question):
     """The non-empty option labels for a question, in order."""
     return [o.get("label", "") for o in (question.get("options") or []) if o.get("label")]
@@ -136,13 +185,19 @@ def handle(data, answers, mode, signal_dir):
             recs = []
             for q in questions:
                 labels = _labels(q)
-                ti = target_index_for(q, answers) or 0
+                tis = target_indices_for(q, answers)
+                first = tis[0] if tis else 0
                 recs.append({
                     "header": q.get("header", ""),
                     "question": q.get("question", ""),
                     "options": labels,
-                    "target_index": ti,
-                    "target_label": labels[ti] if labels else None,
+                    # target_index/target_label = the FIRST selected option,
+                    # kept for backward-compat with single-select drivers.
+                    "target_index": first,
+                    "target_label": labels[first] if labels else None,
+                    # target_indices = ALL options to select (multiSelect checks
+                    # each; single-select is just [first]).
+                    "target_indices": tis,
                     "multiSelect": q.get("multiSelect", False),
                 })
             os.makedirs(signal_dir, exist_ok=True)

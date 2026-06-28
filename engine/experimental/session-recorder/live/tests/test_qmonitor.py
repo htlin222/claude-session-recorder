@@ -67,3 +67,14 @@ def test_plan_groups_one_per_question_plus_submit():
 def test_plan_groups_single_question_no_submit_group():
     pending = {"questions": [{"target_index": 1, "options": ["a", "b"]}]}
     assert qmonitor.plan_groups(pending) == [["Down", "Enter"]]
+
+
+def test_multiselect_keys_toggle_then_submit():
+    assert qmonitor._multiselect_keys([0]) == ["Space", "Right", "Enter"]
+    assert qmonitor._multiselect_keys([0, 2]) == ["Space", "Down", "Down", "Space", "Right", "Enter"]
+    assert qmonitor._multiselect_keys([1, 3]) == ["Down", "Space", "Down", "Down", "Space", "Right", "Enter"]
+
+
+def test_plan_groups_single_multiselect_question():
+    pending = {"questions": [{"multiSelect": True, "target_indices": [0, 2], "options": ["a", "b", "c", "d"]}]}
+    assert qmonitor.plan_groups(pending) == [["Space", "Down", "Down", "Space", "Right", "Enter"]]
