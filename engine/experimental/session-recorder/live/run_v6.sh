@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# superseded by record.py (record-session CLI); kept for reference.
 set -euo pipefail
 LIVE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SR="$(dirname "$LIVE")"

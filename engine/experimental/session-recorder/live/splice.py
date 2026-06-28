@@ -171,12 +171,19 @@ def _seg_file(video, op, idx, outdir, w, h, fps=FPS):
     if op.get("at") == "end":
         src = round(op["raw"][1] - 1.0 / fps, 3)        # boot's last static frame
     elif op.get("freeze_from") == "start":
-        # tail: its own raw range is just the Ctrl+C teardown into a blank shell —
-        # the settled RESULT is the last frame of the PRECEDING hard segment, i.e.
-        # the ~1.5s JUST BEFORE the tail starts (tail.raw[0] == hard.raw[1]). Source
-        # the result there, not from inside the (blank) tail.
-        a = op["raw"][0]
-        src = _calm_time(video, max(0.0, a - 1.5), a)
+        # tail: hold the FINAL settled result. The capture's DONE_HOLD keeps
+        # claude's finished result (its final message + the VHS_TURN_DONE line) on
+        # screen, STABLE, for ~3s right before the brief Ctrl+C teardown. Source
+        # the calmest frame in THAT end window (not the whole tail — earlier the
+        # tail also contains the mid-run "Running…/Drizzling/Burrowing" spinner,
+        # which has its own near-static moments that a whole-tail search can wrongly
+        # pick). The DONE_HOLD window at the end is the only place the FINAL result
+        # is guaranteed shown + stable.
+        a, b = op["raw"]
+        teardown, hold = 0.8, 2.4
+        hi = max(a + 1.0 / fps, b - teardown)
+        lo = max(a, hi - hold)
+        src = _calm_time(video, lo, hi)
     else:
         src = _calm_time(video, op["raw"][0], op["raw"][1])
     png = os.path.join(outdir, f"frame_{idx:03d}.png")

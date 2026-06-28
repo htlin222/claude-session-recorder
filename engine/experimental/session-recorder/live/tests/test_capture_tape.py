@@ -1,4 +1,5 @@
 import gen_capture_tape as g
+import qnav  # noqa  (ensure importable)
 
 SPEC = {
     "launch": {"base": "claude", "flags": [{"arg": "--model opus"}]},
@@ -69,3 +70,63 @@ def test_tape_overrides_inherited_prompt(tmp_path):
                            font_size=26, word_delay=220)
     assert 'Env PS1' in tape and 'Env PROMPT' in tape
     assert 'Env ZDOTDIR' in tape
+
+
+def test_question_turn_waits_for_selector_then_navigates(tmp_path):
+    spec = {
+        "launch": {"base": "claude", "flags": [{"arg": "--model opus"}]},
+        "turns": [{"prompt": "ask me to pick", "question": {"answer_index": 1}}],
+    }
+    tape, plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                          font_size=26, word_delay=220)
+    # after the prompt Enter: wait for the selector footer (VHS-safe ASCII span),
+    # then navigate, then sentinel
+    assert f"/{qnav.FOOTER_RE}/" in tape        # Wait+Screen on the selector footer
+    assert "↑" not in tape                       # no Unicode arrows (VHS parser chokes)
+    i_wait = tape.index(qnav.FOOTER_RE)
+    i_down = tape.index("Down", i_wait)         # qnav: answer_index 1 -> one Down + Enter
+    i_done = tape.index("VHS_TURN_DONE_1")
+    assert i_wait < i_down < i_done
+    # the plan records the question for the downstream stages
+    assert plan["turns"][0]["question"]["answer_index"] == 1
+    # render-mode env so the hook lets the selector paint
+    assert 'Env VHS_QUESTION_MODE "render"' in tape
+
+
+def test_non_question_turn_has_no_selector_wait(tmp_path):
+    spec = {"launch": {"base": "claude", "flags": []},
+            "turns": [{"prompt": "just do it"}]}
+    tape, _ = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                       font_size=26, word_delay=220)
+    assert qnav.FOOTER_RE not in tape
+    assert 'VHS_QUESTION_MODE' not in tape
+
+
+def test_tmux_mode_starts_an_invisible_tmux_before_launch(tmp_path):
+    # tmux mode: the whole claude session runs inside a dedicated-socket,
+    # status-off tmux. The tmux START must be INVISIBLE (Hide ... Show) and must
+    # come BEFORE the CLI-lesson launch so `Type "claude"` is preserved on screen.
+    tape, _plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                           font_size=26, word_delay=220,
+                           tmux={"socket": "vhsq", "name": "vhsq"})
+    assert "Hide" in tape and "Show" in tape
+    assert "tmux -L vhsq" in tape
+    # the Hide/tmux/Show block is BEFORE the first claude launch token
+    i_hide = tape.index("Hide")
+    i_tmux = tape.index("tmux -L vhsq")
+    i_show = tape.index("Show")
+    i_claude = tape.index('Type "claude"')
+    assert i_hide < i_tmux < i_show < i_claude
+    # references the driver-written tmux.conf and the socket-named session
+    assert "tmux.conf" in tape and "-s vhsq" in tape
+    # the answer policy is NEVER a tape Env (the driver passes it via process env)
+    assert "VHS_ANSWERS" not in tape
+
+
+def test_non_tmux_render_has_no_hide_or_tmux(tmp_path):
+    # back-compat: without tmux config the tape is byte-identical to before —
+    # no Hide/Show, no dedicated-socket tmux start.
+    tape, _ = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                       font_size=26, word_delay=220)
+    assert "Hide" not in tape
+    assert "tmux -L" not in tape

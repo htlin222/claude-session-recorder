@@ -1,0 +1,22 @@
+{
+  "_comment": "Phase B demo: a turn that triggers Claude's AskUserQuestion selector, which the VHS tape answers ON SCREEN (Wait+Screen for the selector footer, then Down + Enter to pick option 2). Teaching value: the viewer sees Claude ask, the highlight move, Enter, then Claude proceed. question.answer_index is 0-based into the model's options. Run in render mode (the tape sets VHS_QUESTION_MODE=render automatically because a turn has a `question`).",
+  "launch": {
+    "base": "claude",
+    "flags": [
+      {"arg": "--model opus", "say": "指定 model 為 opus。", "note": "選用 Opus 模型。"},
+      {"arg": "--permission-mode bypassPermissions", "say": "權限模式設成 bypass，自動執行。", "note": "略過權限詢問。"}
+    ],
+    "intro": "我們用 claude 啟動一個互動式 session。",
+    "outro": "稍候就進入它的互動畫面。"
+  },
+  "close": "當 Claude 需要澄清時，它會跳出選項；我們在畫面上選了 Bash，它就照著繼續完成。",
+  "turns": [
+    {
+      "prompt": "Use the AskUserQuestion tool to ask me whether to write hello world as hello.py (Python) or hello.sh (Bash). Wait for my choice, then create the file in the language I pick and tell me which one you used.",
+      "intro": "這次我們故意給一個需要選擇的需求，讓 Claude 先問我們。",
+      "think": "它跳出選單問要 Python 還是 Bash，我們在畫面上把游標移到 Bash 再按 Enter。",
+      "outro": "它收到我們選的 Bash，接著就寫出 hello.sh 並告訴我們用的是哪種語言。",
+      "question": {"answer_index": 1}
+    }
+  ]
+}

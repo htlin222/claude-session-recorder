@@ -1,0 +1,21 @@
+{
+  "_comment": "Phase E1 validation: a prompt that makes Claude ask a MULTI-question AskUserQuestion (two question tabs + Submit). No `question` beat — run via run_v6_tmux.sh so the bg qmonitor answers every tab and submits, ON SCREEN. Proves the robust path handles the multi-question case that previously hung.",
+  "launch": {
+    "base": "claude",
+    "flags": [
+      {"arg": "--model opus", "say": "指定 model 為 opus。", "note": "選用 Opus 模型。"},
+      {"arg": "--permission-mode bypassPermissions", "say": "權限模式設成 bypass，自動執行。", "note": "略過權限詢問。"}
+    ],
+    "intro": "我們用 claude 啟動一個互動式 session。",
+    "outro": "稍候就進入它的互動畫面。"
+  },
+  "close": "一次問好幾個問題，背景程式也會逐頁選好再送出。",
+  "turns": [
+    {
+      "prompt": "Use the AskUserQuestion tool to ask me TWO things in one call: (1) which language, Python or Bash, and (2) what to name the file, greet or hello. Wait for both answers, then write the file in that language with that name and run it.",
+      "intro": "這次故意讓它一次問兩個問題，看背景程式能不能逐頁回答再送出。",
+      "think": "它跳出兩頁選單；背景程式逐頁選好、切到下一頁，最後按下送出。",
+      "outro": "兩頁都自動回答送出後，它就把檔案寫出來跑出結果。"
+    }
+  ]
+}

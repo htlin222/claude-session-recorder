@@ -35,11 +35,18 @@ import json
 import os
 import subprocess
 
+import qnav
+
 THEMES = {"dark": "Catppuccin Mocha", "light": "Catppuccin Latte"}
 PAD = 0.4          # fixed tiny soft pad around each action (no voice sizing)
+DONE_HOLD = 3.0    # hold after each turn's Stop sentinel so the SETTLED result is
+                   # captured stable (else detection/tail-freeze land on the still-
+                   # running frame and the ending freezes mid-execution)
 PRELUDE = 2.0      # Sleep before the launch typing (shell prompt settles)
 PRE_ENTER = 0.4    # beat after typing finishes, before Enter
 LBREATH = 0.5      # breath after each voice-paced launch token (== ledger BREATH)
+QSEE = 1.5         # dwell on the rendered AskUserQuestion selector (viewer reads it)
+QSTEP = 0.5        # beat between selector navigation keys (highlight move is visible)
 
 VOICE = "zh-TW-HsiaoChenNeural"
 RATE = "+0%"
@@ -60,7 +67,7 @@ def _dur(path):
 
 def render(spec, demo, width, height, font_size, word_delay,
            startup_to=60, turn_to=120, theme="Catppuccin Mocha",
-           launch_voice=None, launch_outro=None):
+           launch_voice=None, launch_outro=None, tmux=None):
     """Pure: build (tape_str, plan) from spec. Writes NOTHING to disk.
 
     `launch_voice` (optional): a list of `{token, text, mp3, dur}` for the
@@ -70,7 +77,16 @@ def render(spec, demo, width, height, font_size, word_delay,
     WITH the narration instead of being freeze-extended for ~15s. The launch is
     the deterministic shell region (it runs before `claude` exists, so there is
     no nondeterministic think gap), so sizing it to the voice here is safe.
-    When None, the legacy fixed-PAD path is used (unit tests / back-compat)."""
+    When None, the legacy fixed-PAD path is used (unit tests / back-compat).
+
+    `tmux` (optional): `{"socket": <name>, "name": <session>}`. When set, the
+    WHOLE claude session is filmed INSIDE a dedicated-socket, status-off tmux
+    (a robustness safety net: a bg `qmonitor.py` can answer ANY on-screen
+    AskUserQuestion). The tmux START is emitted INVISIBLY (Hide…Show) BEFORE the
+    launch, so the recording resumes on a clean in-pane shell prompt and the
+    flag-by-flag CLI lesson (`Type "claude --flags"`) is preserved untouched.
+    The answer policy (VHS_ANSWERS) is NEVER a tape Env — it can carry chars VHS
+    cannot parse, so the driver passes it via the real process env instead."""
     turns = spec["turns"]
     cfg = os.path.join(os.path.abspath(demo), ".cfg")
     timeline = os.path.join(os.path.abspath(demo), "session-timeline.jsonl")
@@ -105,7 +121,28 @@ def render(spec, demo, width, height, font_size, word_delay,
     a('Env PS1 "❯ "')
     a('Env PROMPT "❯ "')
     a(f'Env ZDOTDIR "{os.path.join(cfg, "zdotdir")}"')
+    # When a turn expects an AskUserQuestion, the tape must navigate a LIVE selector,
+    # so claude runs in render-mode (the hook lets the selector paint instead of
+    # auto-answering). Default stays "auto" (hang-proof) when no turn asks.
+    has_question = any(t.get("question") for t in turns)
+    if has_question:
+        a('Env VHS_QUESTION_MODE "render"')
+        a(f'Env VHS_SIGNAL_DIR "{os.path.abspath(demo)}"')
     a("")
+    if tmux:
+        # tmux MODE: start the dedicated-socket, status-off tmux INVISIBLY so the
+        # recording resumes on a clean in-pane shell prompt. The Env lines above
+        # are inherited by `exec $SHELL` here, so the in-tmux prompt stays clean,
+        # and the launch typing below runs INSIDE this pane (CLI lesson preserved).
+        sock, name = tmux["socket"], tmux["name"]
+        conf = os.path.join(os.path.abspath(demo), "tmux.conf")
+        a("Hide")
+        a(f'Type "tmux -L {sock} -f {conf} new-session -A -s {name} '
+          "'exec $SHELL'\"")
+        a("Enter")
+        a("Sleep 800ms")
+        a("Show")
+        a("")
     a(f"Sleep {PRELUDE:.0f}s                   # let the shell prompt settle")
     launch_plan = {"tokens": tokens, "base": base, "flags": flags}
     if launch_voice:
@@ -159,13 +196,38 @@ def render(spec, demo, width, height, font_size, word_delay,
             a(f"Sleep {word_delay}ms")
         a(f"Sleep {PRE_ENTER:.3f}s          # beat before Enter")
         a("Enter")
-        a(f"Wait+Screen@{turn_to}s /VHS_TURN_DONE_{i}/   # HARD axis: real think gap")
-        a(f"Sleep {PAD:.3f}s   # settle pad")
-        a("")
-        plan["turns"].append({
+        turn_plan = {
             "index": i, "prompt": t["prompt"], "sentinel": f"VHS_TURN_DONE_{i}",
             "type_dur": type_dur,
-        })
+        }
+        question = t.get("question")
+        if question:
+            # WAIT for the live AskUserQuestion selector to paint (qnav.FOOTER_RE),
+            # then dwell so the viewer reads it, then NAVIGATE to the chosen option
+            # (Down/Up x delta) with a beat between keys so the highlight move is
+            # visible and a beat before the final Enter selects. THEN fall through to
+            # the sentinel wait. qnav.FOOTER_RE is a VHS-SAFE substring (`to
+            # navigate`): VHS's tape parser cannot handle a literal `/` (no `\/`
+            # escape) nor the Unicode arrows `↑↓` inside a Wait+Screen regex.
+            a(f"Wait+Screen@{turn_to}s /{qnav.FOOTER_RE}/   "
+              "# AskUserQuestion selector footer appeared")
+            a(f"Sleep {QSEE:.3f}s   # dwell on the question (viewer reads it)")
+            keys = qnav.keys_to_select(question["answer_index"], 0)
+            for ki, key in enumerate(keys):
+                if ki > 0:
+                    a(f"Sleep {QSTEP:.3f}s   # beat so the highlight move is visible")
+                a(key)
+            turn_plan["question"] = {"answer_index": question["answer_index"]}
+        a(f"Wait+Screen@{turn_to}s /VHS_TURN_DONE_{i}/   # HARD axis: real think gap")
+        # HOLD on the COMPLETED frame after the Stop sentinel prints, so the
+        # finished result (claude's final message + the `VHS_TURN_DONE` line) is
+        # captured STABLE. Without this the tape tore down ~0.4s after the
+        # sentinel, so `done` detection + the tail freeze landed on the still-
+        # running frame BEFORE the result settled — the video then froze on a
+        # "Running… / Drizzling" frame instead of the result.
+        a(f"Sleep {DONE_HOLD:.3f}s   # hold on the settled result + sentinel")
+        a("")
+        plan["turns"].append(turn_plan)
     # teardown
     a("Sleep 500ms")
     a("Ctrl+C")
@@ -189,6 +251,11 @@ def main():
     ap.add_argument("--word-delay", type=int, default=220, help="ms between prompt words")
     ap.add_argument("--startup-timeout", type=int, default=60)
     ap.add_argument("--turn-timeout", type=int, default=120)
+    ap.add_argument("--tmux", action="store_true",
+                    help="film the session INSIDE a dedicated-socket tmux "
+                         "(a bg qmonitor.py answers any on-screen question)")
+    ap.add_argument("--tmux-socket", default="vhsq",
+                    help="dedicated tmux socket/session name for --tmux")
     args = ap.parse_args()
     spec = json.load(open(args.script, encoding="utf-8"))
     tape_path = args.output or os.path.join(args.demo, "session.tape")
@@ -220,10 +287,11 @@ def main():
             launch_outro = {"text": outro_txt, "mp3": os.path.relpath(om, args.demo),
                             "dur": round(synth(outro_txt, om), 3)}
 
+    tmux = {"socket": args.tmux_socket, "name": args.tmux_socket} if args.tmux else None
     tape, plan = render(spec, args.demo, args.width, args.height, args.font_size,
                         args.word_delay, args.startup_timeout, args.turn_timeout,
                         THEMES[args.theme], launch_voice=launch_voice,
-                        launch_outro=launch_outro)
+                        launch_outro=launch_outro, tmux=tmux)
     open(tape_path, "w").write(tape)
     json.dump(plan, open(os.path.join(args.demo, "capture.json"), "w"),
               ensure_ascii=False, indent=2)
