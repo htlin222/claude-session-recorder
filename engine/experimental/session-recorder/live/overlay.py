@@ -61,27 +61,37 @@ def _typing_windows(led):
     return windows
 
 
-def _boot_typing_windows(beats):
-    """[(onset, duration), ...] for each captured launch beat's own
-    narrate-then-reveal span (the base token + each flag) — the zsh command
-    line visibly grows by one token right as the beat's voice ends, so its
-    voice window doubles as that token's "typing" span. Excludes the post-
-    Enter outro beat: same "launch_flag" kind (see author.py), but it narrates
-    while Claude is already loading, not while anything is being typed —
-    distinguished the same way panel.py's _is_flag_beat does, by clip name
-    (open_intro/open_flag* vs open_outro)."""
+def _boot_typing_windows(led):
+    """[(onset, duration), ...] for each captured launch beat's own token
+    reveal — the zsh command line visibly grows by one token right as the
+    beat's voice ENDS (author.py places each token's narration BEFORE it is
+    typed), so the typing itself lands in the short breath gap that follows,
+    not across the narration. The window is that gap: this beat's voice.end
+    to the NEXT beat's onset (the next token's voice.start, or the boot
+    segment's own out-end for the last token when there's no outro), so it
+    never overlaps the next narration. Excludes the post-Enter outro beat:
+    same "launch_flag" kind (see author.py), but it narrates while Claude is
+    already loading, not while anything is being typed — distinguished the
+    same way panel.py's _is_flag_beat does, by clip name (open_intro/
+    open_flag* vs open_outro)."""
+    launch = sorted((b for b in led.get("beats", [])
+                      if b.get("kind") == "launch_flag" and not b.get("drop")
+                      and b.get("voice")),
+                     key=lambda b: b["voice"]["start"])
+    boot = next((s for s in led.get("meta", {}).get("segments", [])
+                 if s.get("kind") == "boot"), None)
+    boot_end = boot["out"][1] if boot else None
     windows = []
-    for b in beats:
-        if b.get("kind") != "launch_flag" or b.get("drop"):
+    for i, b in enumerate(launch):
+        clip = b["voice"].get("clip") or ""
+        if "outro" in os.path.basename(clip):
             continue
-        v = b.get("voice")
-        if not v or not v.get("clip"):
+        nxt = launch[i + 1]["voice"]["start"] if i + 1 < len(launch) else boot_end
+        if nxt is None:
             continue
-        if "outro" in os.path.basename(v["clip"]):
-            continue
-        dur = v["end"] - v["start"]
-        if dur > 0:
-            windows.append((v["start"], dur))
+        gap = nxt - b["voice"]["end"]
+        if gap > 0:
+            windows.append((b["voice"]["end"], gap))
     return windows
 
 
@@ -248,7 +258,7 @@ def mux(demo, video="terminal.mp4", out="session.mp4"):
     # prompt typing plus the boot's own command-line typing — trimmed to that
     # window's actual duration and pulled down to background level before
     # joining the same amix as the narration.
-    typing = (_typing_windows(led) + _boot_typing_windows(led["beats"])
+    typing = (_typing_windows(led) + _boot_typing_windows(led)
               if os.path.exists(SFX_TYPING) else [])
     for k, (onset, dur) in enumerate(typing):
         idx = len(cues) + 1 + k
