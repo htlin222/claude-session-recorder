@@ -24,6 +24,19 @@ record-session /tmp/demo engine/experimental/session-recorder/live/script.exampl
 
 **→ Full docs, quickstart & architecture: [`engine/experimental/session-recorder/live/`](engine/experimental/session-recorder/live/)**
 
+> **Which pipeline do I want?** This repo has two unrelated engines that share
+> vocabulary (`overlay.py`, "verify", "5 gates" vs. `check()`) — don't cite one
+> when you mean the other.
+>
+> | | ⭐ `claude-session-recorder` | CLI-lesson engine |
+> | --- | --- | --- |
+> | Entry point | [`engine/experimental/session-recorder/live/`](engine/experimental/session-recorder/live/) | [`engine/src/`](engine/src/) |
+> | Does | Live-captures a real `claude` TUI session | Scaffolds a per-slug demo (fzf/sed/awk/df/…) |
+> | Verified by | `lint.py`'s `check()` | `verify_sync.py`'s "5 gates" |
+>
+> The "Repo layout" / "Pipeline" sections right below this box describe the
+> **CLI-lesson engine**, not the starred one above.
+
 ---
 
 ## Goal
