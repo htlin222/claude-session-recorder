@@ -21,7 +21,15 @@ vim.o.smartindent = false
 vim.o.cindent = false
 vim.o.indentexpr = ""
 vim.o.expandtab = true
-vim.o.number = true
-vim.o.laststatus = 2
+-- Chrome-free full-screen buffer: no line numbers, no statusline, no
+-- command/mode line, no "~" filler on empty lines below the content — just
+-- the text, for a clean vertical-clip crop.
+vim.o.number = false
+vim.o.relativenumber = false
+vim.o.laststatus = 0
+vim.o.cmdheight = 0
+vim.o.showmode = false
+vim.o.ruler = false
+vim.opt.fillchars = { eob = " " }
 vim.cmd("syntax on")
 vim.cmd("colorscheme catppuccin-mocha")
