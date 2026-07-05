@@ -188,6 +188,11 @@ flag-by-flag, each flag narrated *first*, then the token appears), per-turn
 `{prompt, intro, think, outro}`, and a `close`. What's narrated is exactly what's
 typed and run.
 
+Producing a whole course of clips rather than one demo? See
+[`docs/batch-production-pipeline.md`](docs/batch-production-pipeline.md) for a
+research → syllabus/coverage-matrix → parallel script-writing → production
+pipeline reported from a real 124-clip run.
+
 ---
 
 ## Limitations / status

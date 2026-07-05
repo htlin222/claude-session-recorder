@@ -64,6 +64,10 @@ A demo is described by a `script.*.json` (see `script.example.json`,
 3. If it exposes a new failure mode, add a regression test in `tests/` before
    fixing.
 
+Producing a large batch of clips (a whole course, not one demo)? See
+[`docs/batch-production-pipeline.md`](./docs/batch-production-pipeline.md) for
+a reusable research → syllabus → script-writing → production pipeline.
+
 ## Design docs
 
 The deterministic-pipeline and interactive-question designs live in the repo at
