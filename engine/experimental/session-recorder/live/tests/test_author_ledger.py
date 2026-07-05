@@ -103,3 +103,44 @@ def test_intro_leads_typing_and_think_rides_the_gap(monkeypatch):
     # think voice sits inside its hard visual window (rides the gap)
     assert think["voice"]["start"] >= think["visual"]["start"] - 1e-6
     assert think["voice"]["end"] <= think["visual"]["end"] + 1e-6
+
+
+def test_bumped_intro_gap_does_not_collide_with_prev_beat_window(monkeypatch):
+    # Regression for issue #5 (INTRO_GAP pacing bump). A lead intro's istart is
+    # `typing_out - INTRO_GAP - idur` (author.py ~line 252): growing INTRO_GAP
+    # pushes istart EARLIER. The only real risk (per the issue) is that this
+    # earlier istart collides with the immediately preceding beat's own window —
+    # here, turn 0's outro, which sits right before turn 1's intro in the same
+    # "pre" soft segment. The pre-segment sizing (author.py ~line 186,
+    # `intro_block = iv[i][1] + INTRO_GAP`) is supposed to absorb the entire
+    # growth into the segment's own length rather than stealing from the
+    # clearance after the previous beat, so serialization_violations() — which
+    # generically checks BREATH spacing between every adjacent beat pair — must
+    # stay clean at both the current value and a representative bumped value.
+    monkeypatch.setattr(author, "synth", lambda text, out: 1.5)
+    monkeypatch.setattr(author, "_dur", lambda p: 1.5)
+    anchors = {"ready": 2.0, "vtot": 60.0, "segments": None,
+               "turns": [
+                   {"typing_start": 5.0, "submit": 7.0, "done": 12.0},
+                   {"typing_start": 20.0, "submit": 22.0, "done": 28.0},
+               ]}
+    script = {"launch": {"flags": [], "intro": "啟動"},
+              "turns": [
+                  {"prompt": "x", "intro": "請它寫一個函式",
+                   "think": "正在思考", "outro": "完成了第一步"},
+                  {"prompt": "y", "intro": "請它再寫一個",
+                   "think": "還在想", "outro": "完成了"},
+              ], "close": "結束"}
+    for gap in (0.3, 1.0):    # today's value, and a representative bumped candidate
+        monkeypatch.setattr(author, "INTRO_GAP", gap)
+        led = author.build_ledger("/tmp/ignored", script, anchors, write=False)
+        assert ledger.serialization_violations(led["beats"]) == [], f"INTRO_GAP={gap}"
+        intro1 = next(b for b in led["beats"]
+                      if b["kind"] == "intro" and b["turn_idx"] == 1)
+        outro0 = next(b for b in led["beats"]
+                      if b["kind"] == "outro" and b["turn_idx"] == 0)
+        # istart moves earlier as INTRO_GAP grows, but the pre-segment stretches
+        # to absorb it — the clearance after the prior beat (turn 0's outro)
+        # stays exactly BREATH, never less, regardless of INTRO_GAP.
+        gap_to_prev = round(intro1["voice"]["start"] - outro0["voice"]["end"], 3)
+        assert gap_to_prev >= ledger.BREATH - 1e-6, (gap, gap_to_prev)
