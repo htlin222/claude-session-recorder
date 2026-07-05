@@ -247,6 +247,33 @@ def keyframe_times(led):
     return keys
 
 
+def _turn_stop_events(turns, ups, stop):
+    """Match each REAL (non-instant) turn to its own (UserPromptSubmit, Stop)
+    event pair.
+
+    A turn whose prompt is handled ENTIRELY client-side (capture.json marks it
+    `instant: True` — e.g. /rename, /model, /fast on) still fires
+    UserPromptSubmit (the prompt line was submitted, so `ups` has one entry per
+    turn, in turn order — `ups[ti]` stays correctly indexed), but NEVER fires
+    Stop (no agent turn runs for it, so `stop` only has one entry per REAL
+    turn, in turn order). Naively indexing `stop[ti]` by raw turn number
+    therefore shifts every turn AFTER the first instant one onto the WRONG
+    Stop event — this silently corrupts both tool-event placement
+    (`_tool_events`) and the conclusion text for the rest of the session
+    instead of failing loudly.
+
+    Returns {turn_idx: (ups_row, stop_row)} — only for turns with a real pair
+    (instant turns, and any turn beyond the available ups/stop rows, are
+    omitted)."""
+    real_idx = [i for i, t in enumerate(turns) if not t.get("instant")]
+    out = {}
+    for pos, ti in enumerate(real_idx):
+        if ti >= len(ups) or pos >= len(stop):
+            break
+        out[ti] = (ups[ti], stop[pos])
+    return out
+
+
 def _tool_events(led, rows, turn_idx, ups_wall, stop_wall):
     """Label + place the PreToolUse events of one turn. Labels come from the
     timeline; the OUTPUT time of each event is its wall-clock FRACTION of the turn
@@ -296,18 +323,22 @@ def main():
     # ledger-derived keyframes (launch reveals, turn headers, conclusions) …
     keys = keyframe_times(led)
     # … plus the timeline tool events mapped into each turn's hard output window.
-    for ti in range(len(turns)):
-        if ti >= len(ups) or ti >= len(stop):
-            break
-        keys.extend(_tool_events(led, rows, ti, ups[ti]["t"], stop[ti]["t"]))
+    # Matched by POSITION among the REAL (non-instant) turns only — an instant
+    # turn (e.g. /rename) fires UserPromptSubmit but never Stop, so raw
+    # index-based zipping would shift every later turn onto the wrong pair.
+    turn_pairs = _turn_stop_events(turns, ups, stop)
+    for ti, (u, s) in turn_pairs.items():
+        keys.extend(_tool_events(led, rows, ti, u["t"], s["t"]))
     keys.sort(key=lambda k: k["t"])
 
-    # conclusion text: the turn's Stop message (first line), else the ledger outro.
+    # conclusion text: the turn's Stop message (first line), else the ledger
+    # outro (always the fallback for an instant turn — it has no Stop event).
     outro_txt = {b["turn_idx"]: b.get("text", "")
                  for b in led["beats"] if b["kind"] == "outro"}
 
     def conclusion_text(ti):
-        m = stop[ti].get("message", "") if ti < len(stop) else ""
+        s = turn_pairs.get(ti)
+        m = s[1].get("message", "") if s else ""
         return (m.split("\n")[0] if m else outro_txt.get(ti, ""))[:80]
 
     # render each keyframe cumulatively to a PNG (as v5 does)

@@ -42,6 +42,48 @@ PAD = 0.4          # fixed tiny soft pad around each action (no voice sizing)
 DONE_HOLD = 3.0    # hold after each turn's Stop sentinel so the SETTLED result is
                    # captured stable (else detection/tail-freeze land on the still-
                    # running frame and the ending freezes mid-execution)
+INSTANT_SETTLE = 1.8   # fixed settle Sleep for a turn whose prompt is handled
+                       # ENTIRELY client-side (no model/agent turn runs, so the
+                       # Stop hook — and its VHS_TURN_DONE_N sentinel — never
+                       # fires; Wait+Screen would just burn the full turn-timeout).
+                       # 1.8s is enough for the client-side UI to redraw (banner /
+                       # mode switch / clear) before the tape moves on; DONE_HOLD
+                       # still runs afterward to hold the settled frame.
+
+# Slash commands handled ENTIRELY client-side by Claude Code — no model turn
+# happens, so no Stop hook fires for them. Matched on the prompt's LEADING
+# token (handles args, e.g. "/model opus", "/rename foo"). A value of True
+# means the command is instant regardless of its args; a set means only those
+# specific first-arg subcommands are instant (e.g. "/tui fullscreen" is, but
+# other "/tui ..." subcommands may still invoke the model).
+INSTANT_COMMANDS = {
+    "/rename": True,
+    "/branch": True,
+    "/context": True,
+    "/usage": True,
+    "/clear": True,
+    "/model": True,
+    "/effort": True,
+    "/fast": {"on", "off"},
+    "/tui": {"fullscreen"},
+}
+
+
+def _is_instant_command(prompt):
+    """True iff `prompt` is one of the known ENTIRELY-client-side/instant slash
+    commands (see INSTANT_COMMANDS) — such a turn never fires the Stop hook, so
+    the capture tape must not Wait+Screen on its sentinel."""
+    parts = prompt.strip().split()
+    if not parts or not parts[0].startswith("/"):
+        return False
+    spec = INSTANT_COMMANDS.get(parts[0])
+    if spec is None:
+        return False
+    if spec is True:
+        return True
+    return len(parts) > 1 and parts[1] in spec
+
+
 PRELUDE = 2.0      # Sleep before the launch typing (shell prompt settles)
 PRE_ENTER = 0.4    # beat after typing finishes, before Enter
 LBREATH = 0.5      # breath after each voice-paced launch token (== ledger BREATH)
@@ -234,10 +276,16 @@ def render(spec, demo, width, height, font_size, word_delay,
             a(f"Sleep {word_delay}ms")
         a(f"Sleep {PRE_ENTER:.3f}s          # beat before Enter")
         a("Enter")
-        turn_plan = {
-            "index": i, "prompt": t["prompt"], "sentinel": f"VHS_TURN_DONE_{i}",
-            "type_dur": type_dur,
-        }
+        instant = _is_instant_command(t["prompt"])
+        turn_plan = {"index": i, "prompt": t["prompt"], "type_dur": type_dur}
+        if instant:
+            # ENTIRELY client-side command (e.g. /rename, /fast on): no model
+            # turn runs, so VHS_TURN_DONE_{i} never prints — mark it distinctly
+            # so downstream stages (e.g. panel.py's UserPromptSubmit/Stop
+            # alignment) don't expect a Stop-hook JSONL entry for this turn.
+            turn_plan["instant"] = True
+        else:
+            turn_plan["sentinel"] = f"VHS_TURN_DONE_{i}"
         question = t.get("question")
         if question:
             # WAIT for the live AskUserQuestion selector to paint (qnav.FOOTER_RE),
@@ -256,7 +304,14 @@ def render(spec, demo, width, height, font_size, word_delay,
                     a(f"Sleep {QSTEP:.3f}s   # beat so the highlight move is visible")
                 a(key)
             turn_plan["question"] = {"answer_index": question["answer_index"]}
-        a(f"Wait+Screen@{turn_to}s /VHS_TURN_DONE_{i}/   # HARD axis: real think gap")
+        if instant:
+            # No Stop hook will ever fire for this turn — Wait+Screen on its
+            # sentinel would reliably time out (burning the full turn_to
+            # timeout). Use a short fixed settle Sleep instead.
+            a(f"Sleep {INSTANT_SETTLE:.3f}s   # client-side command settles "
+              "instantly — no Stop hook/sentinel will ever fire for it")
+        else:
+            a(f"Wait+Screen@{turn_to}s /VHS_TURN_DONE_{i}/   # HARD axis: real think gap")
         # HOLD on the COMPLETED frame after the Stop sentinel prints, so the
         # finished result (claude's final message + the `VHS_TURN_DONE` line) is
         # captured STABLE. Without this the tape tore down ~0.4s after the
