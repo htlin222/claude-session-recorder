@@ -371,6 +371,16 @@ def render(spec, demo, width, height, font_size, word_delay,
             # timeout). Use a short fixed settle Sleep instead.
             a(f"Sleep {INSTANT_SETTLE:.3f}s   # client-side command settles "
               "instantly — no Stop hook/sentinel will ever fire for it")
+            # Record the ACTUAL settle duration used (issue #18): two
+            # "instant"-flagged turns back-to-back can merge into one detected
+            # pixel group downstream (no thinking-gap to split on), and
+            # detect_anchors.py recovers by re-deriving the split points from
+            # this KNOWN scripted timing rather than raising. Both the
+            # no-menu (here) and native-menu (below) paths share the same
+            # "instant" flag/shape but can use DIFFERENT settle durations, so
+            # the recovery must read the one actually used per-turn instead of
+            # assuming INSTANT_SETTLE universally.
+            turn_plan["settle"] = INSTANT_SETTLE
         elif native_menu:
             # Same "no Stop hook will ever fire" reasoning as `instant`, but
             # this command paints a real on-screen menu first. Under
@@ -387,6 +397,7 @@ def render(spec, demo, width, height, font_size, word_delay,
             settle = NATIVE_MENU_SETTLE if tmux else INSTANT_SETTLE
             a(f"Sleep {settle:.3f}s   # native menu (e.g. /theme) settles — "
               "no Stop hook/sentinel will ever fire for it either")
+            turn_plan["settle"] = settle    # see the `instant` branch's comment
         else:
             a(f"Wait+Screen@{turn_to}s /VHS_TURN_DONE_{i}/   # HARD axis: real think gap")
         # HOLD on the COMPLETED frame after the Stop sentinel prints, so the

@@ -19,6 +19,13 @@ import numpy as np
 FF = "/opt/homebrew/bin/ffmpeg"
 FPS = 12.5
 
+# Mirrors gen_capture_tape.py's INSTANT_SETTLE: the fixed settle Sleep after an
+# INSTANT (client-side-only) turn's Enter, before the next turn's typing
+# begins. Duplicated here (not imported) so this stays a pure-logic module per
+# CONTRIBUTING.md ("Pure logic is unit-tested. ... I/O stays thin.") — keep the
+# two values in sync if gen_capture_tape.py's ever changes.
+INSTANT_SETTLE = 1.8
+
 
 def dur(path):
     return float(subprocess.run(
@@ -63,6 +70,95 @@ def detect_ready(full):
     return 0.0
 
 
+def _consecutive_instant_runs(turns):
+    """Maximal (start, end) index ranges (inclusive, 0-based) of >=2 consecutive
+    turns flagged `instant` in script order (see gen_capture_tape.py's
+    INSTANT_COMMANDS / turn_plan["instant"]). These are the ONLY turns with no
+    real thinking-gap between one Enter and the next turn's typing, so they are
+    the only ones a merged-group shortfall can legitimately be explained by."""
+    runs, i, n = [], 0, len(turns)
+    while i < n:
+        if turns[i].get("instant"):
+            j = i
+            while j + 1 < n and turns[j + 1].get("instant"):
+                j += 1
+            if j > i:
+                runs.append((i, j))
+            i = j + 1
+        else:
+            i += 1
+    return runs
+
+
+def _split_merged_instant_group(group, turns, start, end, pre_enter):
+    """Split ONE detected group that merged consecutive instant turns
+    turns[start..end] into `end - start + 1` (a, b) sub-groups, using the
+    KNOWN scripted timing (INSTANT_SETTLE + pre_enter + each turn's type_dur)
+    instead of re-detecting the split points from pixels — there is no pixel
+    signal to re-detect from; that absence is exactly the failure mode being
+    recovered from.
+
+    group[1] (the merged span's end) is trusted as the LAST turn's true submit
+    frame — it's the last real pixel event before the recording goes idle.
+    Earlier turns' submit frames are derived by walking BACKWARD from it: the
+    real-time gap between two consecutive instant turns' Enters is exactly
+    that turn's settle Sleep (after the earlier Enter) + pre_enter (beat
+    before the later Enter) + the later turn's type_dur (its typing
+    duration) — all deterministic, scripted quantities. The settle duration
+    isn't always INSTANT_SETTLE: a NATIVE-MENU instant turn (e.g. "/theme",
+    see gen_capture_tape.py's NATIVE_MENU_COMMANDS) shares the exact same
+    `instant` flag/shape but can use a longer settle (NATIVE_MENU_SETTLE under
+    --tmux) — gen_capture_tape.py records the ACTUAL settle it used per-turn
+    in `turns[i]["settle"]`, so read that instead of assuming one constant."""
+    merged_a, merged_b = group
+    b = {end: merged_b}
+    for idx in range(end - 1, start - 1, -1):
+        settle = turns[idx].get("settle", INSTANT_SETTLE)
+        gap = settle + pre_enter + turns[idx + 1].get("type_dur", 1.0)
+        b[idx] = b[idx + 1] - round(gap * FPS)
+    a = {start: merged_a}
+    for idx in range(start + 1, end + 1):
+        a[idx] = b[idx - 1]     # bounds the PRECEDING sub-turn's `done` search
+    return [(a[idx], b[idx]) for idx in range(start, end + 1)]
+
+
+def _recover_merged_instant_groups(groups, turns, n, pre_enter):
+    """When len(groups) < n, try to explain the shortfall as one or more
+    detected groups having merged a run of consecutive INSTANT turns (no
+    thinking-gap to split on). Returns a corrected, full-length `groups` list
+    on success, or None if the shortfall isn't (fully) explained this way — a
+    genuine detection miss must still raise, never get silently papered over."""
+    runs = _consecutive_instant_runs(turns)
+    if not runs:
+        return None
+    collapsed = sum(e - s for s, e in runs)   # groups saved if EVERY run fully merged
+    if len(groups) + collapsed != n:
+        return None    # shortfall not exactly explained by instant-run merges
+
+    # Map each turn index -> the detected-group "slot" it should occupy, in
+    # temporal order, collapsing every run onto a single slot.
+    run_of = {idx: (s, e) for s, e in runs for idx in range(s, e + 1)}
+    slots, i = [], 0
+    while i < len(turns):
+        if i in run_of:
+            s, e = run_of[i]
+            slots.append((s, e))
+            i = e + 1
+        else:
+            slots.append((i, i))
+            i += 1
+    if len(slots) != len(groups):
+        return None     # sanity: the mapping must consume exactly the detected groups
+
+    new_groups = []
+    for (s, e), g in zip(slots, groups):
+        if e > s:
+            new_groups.extend(_split_merged_instant_group(g, turns, s, e, pre_enter))
+        else:
+            new_groups.append(g)
+    return new_groups
+
+
 def detect_turns(full, inp, n, turns, pre_enter):
     """Detect each turn's (typing_start, submit, done) FROM THE VIDEO — the only
     reliable ground truth (VHS video time drifts from the hook wall-clock by many
@@ -100,6 +196,17 @@ def detect_turns(full, inp, n, turns, pre_enter):
         strongest = sorted(groups, key=lambda g: float(inp[g[0]:g[1]].max()),
                            reverse=True)[:n]
         groups = sorted(strongest, key=lambda g: g[0])
+    # FEWER than n: consecutive INSTANT turns (e.g. "/context" immediately
+    # followed by "/fast on") have no thinking-gap between them, so the merged
+    # span can read as ONE group instead of several. Recover using the known
+    # scripted timing rather than raising outright — but ONLY when the
+    # shortfall is fully explained by such a merge (see
+    # _recover_merged_instant_groups); otherwise this is a genuine detection
+    # miss and must still raise below.
+    if len(groups) < n:
+        recovered = _recover_merged_instant_groups(groups, turns, n, pre_enter)
+        if recovered is not None:
+            groups = recovered
     if len(groups) != n:
         raise SystemExit(f"detected {len(groups)} prompt submissions, expected {n}. "
                          f"Tune the input band / thresholds, or the recording differs.")
