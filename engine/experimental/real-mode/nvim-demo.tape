@@ -15,25 +15,16 @@ Enter
 Show
 Sleep 500ms
 
-# -u NONE, not a real vimrc file: Neovim's own defaults.lua runs "filetype
-# plugin on" for anything BESIDES `-u NONE`, which pulls in this machine's
-# ~/.config/nvim/ftplugin/markdown/autocmd.lua (broken require, crashes into
-# a "-- More --" error prompt) purely because the file is named *.md — even
-# with --noplugin and even pointing -u at an isolated init.vim. -u NONE is
-# the only flag that actually skips that. Styling is applied by hand below
-# instead of via init.vim.
-Type "nvim -n -u NONE hypokalemia.md"
+# Plain nvim — no -u override needed. render.sh points XDG_CONFIG_HOME (and
+# XDG_DATA_HOME/XDG_STATE_HOME) at nvim-xdg/ before calling `vhs`, so this
+# picks up ONLY nvim-xdg/config/nvim/init.lua: real Catppuccin Mocha colors,
+# line numbers, no swapfile — never touches ~/.config/nvim.
+Type "nvim hypokalemia.md"
 Enter
 Sleep 1s
 
 Escape
 Sleep 300ms
-Set TypingSpeed 0ms
-Type ":set noautoindent nosmartindent nocindent indentexpr= expandtab | filetype indent off | syntax on | set number laststatus=2 | colorscheme habamax"
-Enter
-Sleep 300ms
-Set TypingSpeed 45ms
-
 Type "i"
 Sleep 400ms
 

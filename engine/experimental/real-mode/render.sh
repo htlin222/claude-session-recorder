@@ -6,6 +6,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Isolated nvim config for any tape that shells out to `nvim` (see
+# nvim-xdg/config/nvim/init.lua) — redirecting the whole XDG trio, not just
+# passing -u, so nvim's runtimepath never contains the real ~/.config/nvim.
+export XDG_CONFIG_HOME="$(pwd)/nvim-xdg/config"
+export XDG_DATA_HOME="$(pwd)/nvim-xdg/data"
+export XDG_STATE_HOME="$(pwd)/nvim-xdg/state"
+
 tape="$1"
 out=$(grep -m1 '^Output ' "$tape" | awk '{print $2}')
 width=$(grep -m1 '^Set Width ' "$tape" | awk '{print $3}')
