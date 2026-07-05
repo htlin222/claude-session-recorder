@@ -50,6 +50,23 @@ INSTANT_SETTLE = 1.8   # fixed settle Sleep for a turn whose prompt is handled
                        # mode switch / clear) before the tape moves on; DONE_HOLD
                        # still runs afterward to hold the settled frame.
 
+# NATIVE_MENU_SETTLE (issue #17): /theme, /rewind, /memory, /plugin install DO
+# paint an on-screen menu (unlike the no-menu INSTANT_COMMANDS above) — but
+# selecting an option STILL fires no Stop hook (confirmed via a live tmux
+# probe), so they need the same "skip the sentinel Wait" treatment. The
+# difference: under --robust/--tmux, a background qmonitor.py is the one
+# actually driving that menu (see qmonitor._answer_one), and the tape must not
+# move on to the next turn's typing before qmonitor's cycle has finished.
+# Sized from qmonitor's own defaults (max_wait=60s is just its own per-wait
+# ceiling, not a target): read_dwell (2.5s, dwell before the first keystroke)
+# + a generous 5 keystrokes at key_gap (0.8s) for a single-level menu with a
+# handful of options (Down x<=4 + Enter) = ~4.0s + a couple of poll (0.3s)
+# cycles for the post-answer confirmation match (~0.6s). That's ~7.1s in the
+# realistic case; round up to 10s for comfortable headroom without anywhere
+# approaching qmonitor's own 60-90s worst-case ceilings (which would defeat
+# the point of not hanging the capture wait).
+NATIVE_MENU_SETTLE = 10.0
+
 # Slash commands handled ENTIRELY client-side by Claude Code — no model turn
 # happens, so no Stop hook fires for them. Matched on the prompt's LEADING
 # token (handles args, e.g. "/model opus", "/rename foo"). A value of True
@@ -69,19 +86,52 @@ INSTANT_COMMANDS = {
 }
 
 
-def _is_instant_command(prompt):
-    """True iff `prompt` is one of the known ENTIRELY-client-side/instant slash
-    commands (see INSTANT_COMMANDS) — such a turn never fires the Stop hook, so
-    the capture tape must not Wait+Screen on its sentinel."""
+# Slash commands that DO paint a native on-screen menu (the same selector
+# widget AskUserQuestion uses — qnav.FOOTER_RE/qparse recognize it) but STILL
+# fire no Stop hook once an option is picked (issue #17: confirmed via a live
+# tmux probe for /theme; qmonitor.py's docstring/#14 lists the same set as the
+# native-menu commands it polls for and answers). Same leading-token +
+# optional-subcommand-set shape as INSTANT_COMMANDS. `/plugin` has OTHER
+# subcommands (list, uninstall, ...) that do NOT show the scope-picker menu —
+# only "install" does, so it's matched conservatively as a subcommand set,
+# not `True`.
+NATIVE_MENU_COMMANDS = {
+    "/theme": True,
+    "/rewind": True,
+    "/memory": True,
+    "/plugin": {"install"},
+}
+
+
+def _match_command_table(prompt, table):
+    """Shared leading-token (+ optional required subcommand) matcher used by
+    both _is_instant_command and _is_native_menu_command: `table` maps a
+    leading token to either True (any/no args match) or a set of the ONLY
+    second-token subcommands that match."""
     parts = prompt.strip().split()
     if not parts or not parts[0].startswith("/"):
         return False
-    spec = INSTANT_COMMANDS.get(parts[0])
+    spec = table.get(parts[0])
     if spec is None:
         return False
     if spec is True:
         return True
     return len(parts) > 1 and parts[1] in spec
+
+
+def _is_instant_command(prompt):
+    """True iff `prompt` is one of the known ENTIRELY-client-side/instant slash
+    commands (see INSTANT_COMMANDS) — such a turn never fires the Stop hook, so
+    the capture tape must not Wait+Screen on its sentinel."""
+    return _match_command_table(prompt, INSTANT_COMMANDS)
+
+
+def _is_native_menu_command(prompt):
+    """True iff `prompt` is one of the known NATIVE-menu slash commands (see
+    NATIVE_MENU_COMMANDS) — these DO paint an on-screen menu (qmonitor.py
+    drives it under --robust), but STILL fire no Stop hook, so the capture
+    tape must not Wait+Screen on its sentinel either (issue #17)."""
+    return _match_command_table(prompt, NATIVE_MENU_COMMANDS)
 
 
 PRELUDE = 2.0      # Sleep before the launch typing (shell prompt settles)
@@ -277,12 +327,23 @@ def render(spec, demo, width, height, font_size, word_delay,
         a(f"Sleep {PRE_ENTER:.3f}s          # beat before Enter")
         a("Enter")
         instant = _is_instant_command(t["prompt"])
+        # native-menu commands (/theme, /rewind, /memory, /plugin install):
+        # DO paint an on-screen menu, but fire no Stop hook either — so they
+        # need the same sentinel-skip as `instant` above (issue #17). This
+        # check does NOT depend on `tmux` (whether a Stop hook fires is a
+        # property of the COMMAND, true in both --robust and standard mode);
+        # only the SETTLE DURATION below is mode-dependent, since only
+        # --robust mode actually runs a qmonitor to drive the menu.
+        native_menu = _is_native_menu_command(t["prompt"])
         turn_plan = {"index": i, "prompt": t["prompt"], "type_dur": type_dur}
-        if instant:
-            # ENTIRELY client-side command (e.g. /rename, /fast on): no model
-            # turn runs, so VHS_TURN_DONE_{i} never prints — mark it distinctly
-            # so downstream stages (e.g. panel.py's UserPromptSubmit/Stop
+        if instant or native_menu:
+            # ENTIRELY client-side command (e.g. /rename, /fast on) OR a
+            # native-menu command (e.g. /theme): no model turn runs, so
+            # VHS_TURN_DONE_{i} never prints — mark it distinctly so
+            # downstream stages (e.g. panel.py's UserPromptSubmit/Stop
             # alignment) don't expect a Stop-hook JSONL entry for this turn.
+            # Both cases share the exact same "instant" flag/shape so every
+            # downstream consumer only has to know about ONE key.
             turn_plan["instant"] = True
         else:
             turn_plan["sentinel"] = f"VHS_TURN_DONE_{i}"
@@ -304,12 +365,28 @@ def render(spec, demo, width, height, font_size, word_delay,
                     a(f"Sleep {QSTEP:.3f}s   # beat so the highlight move is visible")
                 a(key)
             turn_plan["question"] = {"answer_index": question["answer_index"]}
-        if instant:
+        if instant and not native_menu:
             # No Stop hook will ever fire for this turn — Wait+Screen on its
             # sentinel would reliably time out (burning the full turn_to
             # timeout). Use a short fixed settle Sleep instead.
             a(f"Sleep {INSTANT_SETTLE:.3f}s   # client-side command settles "
               "instantly — no Stop hook/sentinel will ever fire for it")
+        elif native_menu:
+            # Same "no Stop hook will ever fire" reasoning as `instant`, but
+            # this command paints a real on-screen menu first. Under
+            # --robust/--tmux, a background qmonitor.py is the one actually
+            # navigating that menu (poll for footer -> dwell -> keystrokes ->
+            # confirm poll) — the tape must give it real wall-clock time to
+            # finish BEFORE typing the next turn's prompt into what could
+            # still be an open menu. In STANDARD (non-tmux) mode there is no
+            # qmonitor at all, so the menu never gets navigated regardless of
+            # how long we sleep here (that scenario is not supported by this
+            # fix — see issue #17); since there's no real answer-cycle to
+            # wait out, fall back to the short INSTANT_SETTLE so we at least
+            # don't burn the full turn-timeout on an unreachable sentinel.
+            settle = NATIVE_MENU_SETTLE if tmux else INSTANT_SETTLE
+            a(f"Sleep {settle:.3f}s   # native menu (e.g. /theme) settles — "
+              "no Stop hook/sentinel will ever fire for it either")
         else:
             a(f"Wait+Screen@{turn_to}s /VHS_TURN_DONE_{i}/   # HARD axis: real think gap")
         # HOLD on the COMPLETED frame after the Stop sentinel prints, so the
