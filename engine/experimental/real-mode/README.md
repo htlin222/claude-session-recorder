@@ -26,24 +26,29 @@ cd engine/experimental/real-mode
 If `<name>.cues` exists next to the tape, `render.sh` mixes a macOS system
 sound (from `/System/Library/Sounds/`) onto the output at each listed
 timestamp — no cues file, silent output, unchanged from before. One
-`<seconds> <Sound.aiff>` pair per line:
+`<seconds> <Sound.aiff>` pair per line, timed to when that line STARTS
+typing (not when it finishes — the sound plays under the typing, not after
+it):
 
 ```
-1.10 Hero.aiff
-2.14 Glass.aiff
-3.22 Tink.aiff
+0.00 Hero.aiff
+1.10 Glass.aiff
+2.14 Tink.aiff
 ```
 
 `nvim-demo.cues` gives each markdown heading level (and list items) their
-own sound as they're typed — H1 `Hero.aiff`, H2 `Glass.aiff`, H3 `Pop.aiff`
-(reserved, unused by this particular demo), list items `Tink.aiff`.
+own sound right as they start being typed — H1 `Hero.aiff`, H2
+`Glass.aiff`, H3 `Pop.aiff` (reserved, unused by this particular demo),
+list items `Tink.aiff`.
 
 Timestamps were found empirically, not read off the tape's `Set
 TypingSpeed` — with no `Sleep` between a line's `Type` and its `Enter`,
 VHS's own frame quantization makes exact keystroke arithmetic unreliable
-past ~100ms. The workflow: render once with no cues file, then binary-search
-a handful of `ffmpeg -i out.mp4 -ss T -update 1 -vframes 1 probe.png` frame
-grabs around each expected line-completion time until each line reads as
+past ~100ms. Line N's start is line N-1's completion (the gap between
+`Enter` and the next `Type` is near zero), so the workflow: render once
+with no cues file, then binary-search a handful of `ffmpeg -i out.mp4 -ss T
+-update 1 -vframes 1 probe.png` frame grabs around each expected line-
+completion time until each line reads as
 just-finished, and use those `T`s. Good enough for a sound that's flavor,
 not a hard sync target — re-derive the same way if the script text changes.
 
