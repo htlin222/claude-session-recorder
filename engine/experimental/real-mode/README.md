@@ -38,17 +38,18 @@ Same shape as `nvim-demo.tape` / `lizard-demo.tape`:
 Two SEPARATE constraints — don't conflate "keep the clip short" with "keep
 the content short", they're independent dials:
 
-- **Line count is a duration dial, not a content cap.** More lines just
-  makes a longer clip (each one costs its typing time + the 0.5s breath).
-  5–7 lines (1 H1 + 2–3 H2+list groups) lands ~10–12s; nothing stops a
-  20-line outline, it just runs longer.
-- **The real hard limit is the screen, not pacing**: at `FontSize 42` /
-  `Height 1350`, measured line height is ~52px with the first line starting
-  ~68px down — `(1350-68)/52 ≈ 24` lines fit before nvim starts
-  **scrolling**, at which point earlier lines get pushed off the top and
-  disappear from the recording. A blank spacer line (between H2 groups)
-  costs a full line-slot too. Budget **~20 lines max** to leave headroom
-  (e.g. 1 H1 + 6 H2+list groups, or fewer groups with longer list lines).
+- **Line count is a duration dial, no real cap.** More lines just makes a
+  longer clip (each one costs its typing time + the 0.5s breath). 5–7 lines
+  (1 H1 + 2–3 H2+list groups) lands ~10–12s.
+- At `FontSize 42` / `Height 1350` (measured line height ~52px, first line
+  ~68px down), `(1350-68)/52 ≈ 24` lines fit before nvim starts
+  **scrolling** — earlier lines get pushed off the top instead of the
+  whole outline staying visible at once. Tested this at 30 lines expecting
+  it to look broken; it doesn't — it reads as an ordinary, continuous
+  scroll-up, same as typing a long file in a real terminal. So: **~24 is
+  only the "whole thing fits on one screen" line**, not a usability limit —
+  go past it on purpose if the reveal-then-scroll look is what you want for
+  a longer outline.
 - **Per-line wrap limit** at `Width 1080` (exceeding this wraps mid-line
   and looks broken, separate from the screen's line-count limit above):
   **~42 ASCII chars/line** (incl. the `#`/`##`/`-` prefix), **~21 CJK
