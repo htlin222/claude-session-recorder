@@ -26,6 +26,81 @@ def test_detect_turns_guided_drops_spinner_peaks():
     assert 2.32 not in submits and 5.12 not in submits
 
 
+def test_merge_same_burst_groups_fuses_wrap_split_typing():
+    # Issue #22 repro (real --robust capture, 27-word/3-line prompt): a long
+    # prompt that wraps the input box onto a new line makes the auto-located
+    # FIXED band lose the just-typed line and briefly show the fresh (blank)
+    # wrapped line, so ONE continuous typing burst reads as TWO near-max
+    # "submissions" with a short, RISING gap between them (never idle). Real
+    # measurements: peaks 379 and 351 out of fmax 379 (ratios 1.00/0.93), 19
+    # frames (1.52s) apart, climbing from 43 to 175 within that gap.
+    inp = np.zeros(60)
+    inp[10:14] = 400.0                                  # first wrap piece
+    for i, v in zip(range(14, 19), np.linspace(20, 150, 5)):
+        inp[i] = v                                       # short RISING dip: still typing
+    inp[19:30] = 390.0                                   # second wrap piece (the real submit)
+    fmax = float(inp.max())
+    groups = [(10, 14), (19, 30)]
+    assert da._merge_same_burst_groups(groups, inp, fmax) == [(10, 30)]
+
+
+def test_merge_same_burst_groups_leaves_distinct_turns_alone():
+    # A genuinely separate (if fast) next turn must NOT be swept into the
+    # same merge just because it also has a near-max peak and a short gap —
+    # the discriminator is whether the gap is IDLE (flat) or actively
+    # refilling. Mirrors the gap shape used by
+    # test_detect_turns_recovers_merged_consecutive_instant_group (flat 0
+    # between two real submissions).
+    inp = np.zeros(60)
+    inp[10:14] = 400.0
+    inp[30:34] = 390.0                                   # flat/idle gap in between: real turn
+    fmax = float(inp.max())
+    groups = [(10, 14), (30, 34)]
+    assert da._merge_same_burst_groups(groups, inp, fmax) == groups
+
+
+def test_merge_same_burst_groups_leaves_weak_spinner_leak_alone():
+    # Companion sanity check: a moderate-peak spinner leak (well under the
+    # near-max floor) must never be fused in, regardless of gap length —
+    # that disambiguation is left entirely to the STRONGEST-peak selection
+    # below, unchanged.
+    inp = np.zeros(60)
+    inp[10:14] = 400.0
+    inp[20:24] = 250.0                                   # spinner leak: short gap, weak peak
+    fmax = float(inp.max())
+    groups = [(10, 14), (20, 24)]
+    assert da._merge_same_burst_groups(groups, inp, fmax) == groups
+
+
+def test_detect_turns_wrap_split_no_longer_starves_neighbouring_turns():
+    # End-to-end repro of the actual failure: a 3-turn demo where turn 1's
+    # long prompt wraps into 2 near-max pieces (see the merge tests above)
+    # and turn 2 is a WEAK real submission (peak just over half-max, like a
+    # native-menu turn such as "/theme" — its content never fills the input
+    # box the way typed text does). Before the fix, the naive "4 raw groups
+    # for 3 turns -> keep the 3 STRONGEST peaks" selection kept BOTH wrap
+    # pieces (peaks 385/390) and dropped turn 2's real (weaker, peak 220)
+    # group instead — corrupting turn 1's own submit (took the FIRST wrap
+    # piece's end, far too early) and starving its `done` search window
+    # (bounded by the SECOND wrap piece's start, only ~1s later), while turn
+    # 2 was wrongly assigned the second wrap piece's end as its own submit.
+    N = 180
+    inp = np.zeros(N)
+    inp[10:14] = 400.0                                   # turn 0 (real) -> submit 1.12
+    inp[40:55] = 385.0                                   # turn 1 wrap piece 1
+    for i, v in zip(range(55, 68), np.linspace(20, 150, 13)):
+        inp[i] = v                                        # still typing: rising, never idle
+    inp[68:90] = 390.0                                   # turn 1 wrap piece 2 (the real submit)
+    inp[130:134] = 220.0                                 # turn 2 (real, weak) -> submit 10.72
+    full = np.full(N, 100.0)
+    turns = [{"type_dur": 0.5}, {"type_dur": 1.0}, {"type_dur": 0.3}]
+    out = da.detect_turns(full, inp, n=3, turns=turns, pre_enter=0.4)
+    submits = [round(t["submit"], 3) for t in out]
+    # turn 1 submits at the SECOND (real) wrap piece's end, not the first;
+    # turn 2 keeps its own (weak) real group instead of losing it.
+    assert submits == [1.12, 7.2, 10.72]
+
+
 def test_detect_turns_raises_when_fewer_than_n():
     # FEWER groups than expected is a genuine miss — still raise (guided only
     # trims an OVERSHOOT, it never invents submissions).
@@ -195,6 +270,27 @@ def test_detect_turns_raises_when_mixed_settle_shortfall_not_explained():
         assert False, "expected SystemExit: shortfall not fully explained by any partition"
     except SystemExit:
         pass
+
+
+def test_detect_turns_last_turn_done_never_exceeds_raw_video_length():
+    # Real repro: the LAST turn's group can run all the way to the raw
+    # capture's final analyzed frame when the recording stops mid-interaction
+    # (e.g. a native menu like "/theme" still open, no Enter-clear ever
+    # observed). `submit` then just means "the recording ended here", so the
+    # existing submit+0.3s floor must not be allowed to push `done` past the
+    # video's own length — that produced a `done` > vtot, which downstream
+    # turned into a negative-width (or invalid) tail freeze window.
+    N = 40
+    inp = np.zeros(N)
+    inp[10:N] = 220.0    # group runs off the end of the analyzed video: no clear seen
+    full = np.full(N, 100.0)
+    turns = [{"type_dur": 0.3}]
+    out = da.detect_turns(full, inp, n=1, turns=turns, pre_enter=0.4)
+    vtot = N / da.FPS
+    assert out[0]["done"] <= vtot
+    # one frame of slack left so a degenerate tail freeze still has a real
+    # frame to source from (mirrors BootStrategy's "at end" -1 frame convention)
+    assert out[0]["done"] <= round(vtot - 1.0 / da.FPS, 3)
 
 
 def test_raw_segments_boot_then_alternating_soft_hard():
