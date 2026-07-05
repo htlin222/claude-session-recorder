@@ -167,6 +167,13 @@ def turn_panel(num, total, prompt, events, revealed, conclusion=None):
 
 
 def _wrap(d, text, font, maxw):
+    # Real Claude tool-result/reply content (a tool `target` or turn
+    # `conclusion`) can contain literal newlines. ImageDraw.textlength()
+    # raises ValueError on any string containing "\n", so collapse embedded
+    # newlines (including CRLF, which splitlines() also splits on) into
+    # spaces before measuring/wrapping. Degrades gracefully for all-newline
+    # or empty input -> "".
+    text = " ".join(text.splitlines())
     out, cur = [], ""
     for ch in text:
         if d.textlength(cur + ch, font=font) > maxw and cur:
