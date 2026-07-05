@@ -121,6 +121,12 @@ def render(spec, demo, width, height, font_size, word_delay,
     a('Env PS1 "❯ "')
     a('Env PROMPT "❯ "')
     a(f'Env ZDOTDIR "{os.path.join(cfg, "zdotdir")}"')
+    # Prompt-suggestion ghost text: when a reply reads like an invitation to a
+    # next step, Claude Code populates that suggestion as grey ghost text in
+    # the empty input box. This has coincided with the NEXT scripted turn's
+    # typing silently failing to register (idle for the full Wait timeout).
+    # Disabling suggestions during capture made the symptom disappear.
+    a('Env CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION "false"')
     # When a turn expects an AskUserQuestion, the tape must navigate a LIVE selector,
     # so claude runs in render-mode (the hook lets the selector paint instead of
     # auto-answering). Default stays "auto" (hang-proof) when no turn asks.

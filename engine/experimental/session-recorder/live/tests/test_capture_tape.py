@@ -72,6 +72,19 @@ def test_tape_overrides_inherited_prompt(tmp_path):
     assert 'Env ZDOTDIR' in tape
 
 
+def test_tape_disables_prompt_suggestion_ghost_text(tmp_path):
+    # regression: Claude Code's prompt-suggestion feature can populate grey
+    # ghost text in the empty input box when a reply reads like an invitation
+    # to a next step. On at least two occasions this coincided with the NEXT
+    # scripted turn's typing silently failing to register (terminal sat idle
+    # on the ghost suggestion for the full Wait timeout, no typed chars, no
+    # reply). Disabling suggestions during capture made the symptom disappear
+    # across dozens of subsequent recordings.
+    tape, _plan = g.render(SPEC, demo=str(tmp_path), width=1200, height=1080,
+                           font_size=26, word_delay=220)
+    assert 'Env CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION "false"' in tape
+
+
 def test_question_turn_waits_for_selector_then_navigates(tmp_path):
     spec = {
         "launch": {"base": "claude", "flags": [{"arg": "--model opus"}]},
