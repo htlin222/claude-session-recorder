@@ -52,6 +52,35 @@ VOICE = "zh-TW-HsiaoChenNeural"
 RATE = "+0%"
 
 
+def vhs_type(text):
+    """Return a list of one or more `Type '...'`/`Type "..."` lines that,
+    typed back-to-back, reproduce `text` exactly.
+
+    VHS's tape grammar has no backslash-escape for quotes inside a `Type
+    "..."` line, so a literal `"` (or `'`) in the text would otherwise break
+    the line with `Invalid command: ...`. Pick whichever delimiter `text`
+    doesn't contain; when it contains BOTH (e.g. a `--mcp-config` JSON blob
+    mixing `'` and `"`), split into consecutive `Type` lines, switching
+    delimiter each time the OTHER delimiter char is encountered so no line's
+    body ever contains its own delimiter."""
+    if '"' not in text:
+        return [f'Type "{text}"']
+    if "'" not in text:
+        return [f"Type '{text}'"]
+    lines = []
+    cur = ""
+    delim = '"' if text[0] != '"' else "'"
+    for ch in text:
+        if ch == delim:
+            lines.append(f"Type {delim}{cur}{delim}")
+            delim = "'" if delim == '"' else '"'
+            cur = ch
+        else:
+            cur += ch
+    lines.append(f"Type {delim}{cur}{delim}")
+    return lines
+
+
 def synth(text, out_mp3):           # I/O boundary (mirrors author.synth)
     subprocess.run(["edge-tts", "--voice", VOICE, "--rate", RATE,
                     "--text", text, "--write-media", out_mp3],
@@ -164,7 +193,8 @@ def render(spec, demo, width, height, font_size, word_delay,
             at = round(cur, 3)
             note = "narrate intro" if bi == 0 else "narrate flag, token not shown yet"
             a(f"Sleep {d:.3f}s   # {note}")
-            a(f'Type "{tok}"' if bi == 0 else f'Type " {tok}"')
+            for line in vhs_type(tok if bi == 0 else " " + tok):
+                a(line)
             a(f"Sleep {LBREATH:.3f}s   # breath after the token appears")
             beats_plan.append({"token": tok, "text": lv.get("text", ""),
                                "mp3": lv["mp3"], "dur": round(d, 3), "at": at})
@@ -181,7 +211,8 @@ def render(spec, demo, width, height, font_size, word_delay,
         # LEGACY fixed-PAD launch: typed token-by-token with a fixed PAD between
         # tokens. No narration (back-compat / unit tests).
         for ti, tok in enumerate(tokens):
-            a(f'Type "{tok}"' if ti == 0 else f'Type " {tok}"')
+            for line in vhs_type(tok if ti == 0 else " " + tok):
+                a(line)
             a(f"Sleep {PAD:.3f}s   # fixed pad after token")
         a("Enter")
         a(f"Wait+Screen@{startup_to}s /shift\\+tab|for shortcuts/")
@@ -198,7 +229,8 @@ def render(spec, demo, width, height, font_size, word_delay,
         a(f"# --- Turn {i} ---")
         a(f"Sleep {PAD:.3f}s   # pre-prompt pad")
         for w, word in enumerate(words):
-            a(f'Type "{word}"' if w == 0 else f'Type " {word}"')
+            for line in vhs_type(word if w == 0 else " " + word):
+                a(line)
             a(f"Sleep {word_delay}ms")
         a(f"Sleep {PRE_ENTER:.3f}s          # beat before Enter")
         a("Enter")
