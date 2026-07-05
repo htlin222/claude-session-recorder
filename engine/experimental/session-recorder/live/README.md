@@ -136,6 +136,11 @@ boundary or dropped if they can't fit. Design + plan:
 [design](../../../../docs/plans/2026-06-28-event-ledger-deterministic-pipeline-design.md),
 [implementation plan](../../../../docs/plans/2026-06-28-event-ledger-deterministic-pipeline-plan.md).
 
+`ledger.json` is also a stable, documented **public output surface** — see
+[downstream reuse patterns](docs/ledger-downstream-patterns.md) for two
+post-production tools (SFX overlay, auto title cards) that consume it directly
+without touching the recorder's internals.
+
 ---
 
 ## Interactive AskUserQuestion
