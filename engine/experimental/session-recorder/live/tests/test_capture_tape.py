@@ -143,3 +143,77 @@ def test_non_tmux_render_has_no_hide_or_tmux(tmp_path):
                        font_size=26, word_delay=220)
     assert "Hide" not in tape
     assert "tmux -L" not in tape
+
+
+# --- quote-escaping regressions -------------------------------------------
+#
+# VHS's tape grammar has no backslash-escape for quotes inside a `Type "..."`
+# line, so a turn prompt or launch flag arg containing a literal `"` (or `'`,
+# or BOTH) used to break the line with `Invalid command: ...`. These tests
+# extract the actual `Type <delim>...<delim>` lines VHS would execute and
+# replay them (concatenating bodies in order) to prove the ORIGINAL string is
+# reproduced byte-for-byte, and that no line is malformed (unbalanced or with
+# the delimiter char leaking into its own body — either of which VHS's parser
+# cannot handle).
+
+def _replay_type_lines(tape, start_marker, end_marker):
+    """Simulate what VHS would type for every `Type <delim>...<delim>` line
+    between `start_marker` and `end_marker`, concatenated in order."""
+    start = tape.index(start_marker)
+    end = tape.index(end_marker, start)
+    segment = tape[start:end]
+    typed = ""
+    for line in segment.splitlines():
+        line = line.strip()
+        if not line.startswith("Type "):
+            continue
+        rest = line[len("Type "):]
+        delim = rest[0]
+        assert delim in "\"'", f"Type line has no valid delimiter: {line!r}"
+        assert rest[-1] == delim, f"Type line is unbalanced: {line!r}"
+        body = rest[1:-1]
+        assert delim not in body, (
+            f"delimiter {delim!r} leaked into its own Type body: {line!r}")
+        typed += body
+    return typed
+
+
+def test_turn_prompt_with_only_double_quotes_round_trips(tmp_path):
+    prompt = 'say "hello world" now'
+    spec = {"launch": {"base": "claude", "flags": []}, "turns": [{"prompt": prompt}]}
+    tape, _plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                           font_size=26, word_delay=220)
+    replayed = _replay_type_lines(tape, "# --- Turn 1 ---", "Enter")
+    assert replayed == prompt
+
+
+def test_turn_prompt_with_only_single_quotes_round_trips(tmp_path):
+    prompt = "say 'hello world' now"
+    spec = {"launch": {"base": "claude", "flags": []}, "turns": [{"prompt": prompt}]}
+    tape, _plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                           font_size=26, word_delay=220)
+    replayed = _replay_type_lines(tape, "# --- Turn 1 ---", "Enter")
+    assert replayed == prompt
+
+
+def test_launch_flag_with_mixed_quotes_round_trips(tmp_path):
+    # the exact failure mode from the bug report: a value mixing BOTH ' and "
+    # can't be wrapped in either delimiter alone.
+    arg = ('--mcp-config \'{"mcpServers":{"docs":{"type":"http",'
+           '"url":"https://example.com/mcp"}}}\'')
+    spec = {"launch": {"base": "claude", "flags": [{"arg": arg}]},
+             "turns": [{"prompt": "hello"}]}
+    tape, plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                          font_size=26, word_delay=220)
+    assert plan["launch"]["tokens"] == ["claude", arg]
+    replayed = _replay_type_lines(tape, "Sleep 2s", "Wait+Screen")
+    assert replayed == "claude" + " " + arg
+
+
+def test_turn_prompt_with_mixed_quotes_round_trips(tmp_path):
+    prompt = '''say "it's" fine'''
+    spec = {"launch": {"base": "claude", "flags": []}, "turns": [{"prompt": prompt}]}
+    tape, _plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                           font_size=26, word_delay=220)
+    replayed = _replay_type_lines(tape, "# --- Turn 1 ---", "Enter")
+    assert replayed == prompt
