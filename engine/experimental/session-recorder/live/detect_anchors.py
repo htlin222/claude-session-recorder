@@ -212,6 +212,55 @@ def _recover_merged_instant_groups(groups, turns, n, pre_enter):
     return _try_recover_with_runs(sub_runs, groups, turns, n, pre_enter)
 
 
+def _merge_same_burst_groups(groups, inp, fmax):
+    """Fuse adjacent groups that are really ONE continuous typing burst split by
+    a transient dip, not two submissions. A long prompt that wraps
+    the input box onto a new line makes the auto-located band (a FIXED, ~5-row
+    window near the bottom — see `signals()`) briefly show a near-empty row: the
+    just-typed line's content shifts out of the tracked band and the freshly
+    wrapped (still-blank) line takes its place, so the band's brightness drops
+    to near-baseline and climbs again as the next line fills — the EXACT
+    rise-then-clear pixel shape `detect_turns` uses to mean "Enter cleared the
+    box", even though the user never stopped typing (confirmed against a real
+    27-word/3-line --robust capture: two "submits" 1.52s apart, both >=0.92 of
+    the global peak, while the actual next turn's typing hadn't even started).
+
+    Distinguish this from a genuine pair of DIFFERENT (but quick, back-to-back)
+    turns — which can ALSO show a short gap with near-max peaks either side, so
+    gap-length and peak-strength alone don't separate the two cases — using
+    what a REAL Enter does that a wrap never does: it makes the box actually go
+    IDLE. A real gap sits flat at (near) its post-clear floor for its whole
+    length (nothing is being typed); a wrap dip instead keeps CLIMBING almost
+    immediately, because the very same typing burst is still going — measured:
+    the real dip fell 379->43 then was back up to 175 just 18 frames later,
+    never resting. So on top of:
+    - SHORT gap: at most ~2s, generous vs. the ~1.5s wrap dip measured (a real
+      turn boundary always has at least a settle/think/PAD gap of several
+      seconds; back-to-back INSTANT turns are handled separately and never show
+      a partial dip like this — see `_recover_merged_instant_groups`);
+    - both flanking peaks genuinely NEAR-MAX (typed text fills the box either
+      side of the wrap), whereas spinner/response leakage peaks measurably
+      lower (the existing `test_detect_turns_guided_drops_spinner_peaks`
+      fixture never exceeds 0.75 of fmax);
+    also require the gap to be RISING, not idle: the band's value right before
+    the next group resumes must sit well above its value right after the
+    previous group cleared."""
+    GAP_CAP = round(2.0 * FPS)             # generous vs. the ~1.5s wrap dip measured
+    STRONG = 0.8 * fmax                    # near-max only; spinner leakage tops out ~0.75x
+    CLIMB = 0.2 * fmax                     # must be actively refilling, not idle
+    merged = list(groups[:1])
+    for a, b in groups[1:]:
+        pa, pb = merged[-1]
+        if (a - pb <= GAP_CAP
+                and float(inp[pa:pb].max()) >= STRONG
+                and float(inp[a:b].max()) >= STRONG
+                and float(inp[a - 1]) - float(inp[pb]) >= CLIMB):
+            merged[-1] = (pa, b)
+        else:
+            merged.append((a, b))
+    return merged
+
+
 def detect_turns(full, inp, n, turns, pre_enter):
     """Detect each turn's (typing_start, submit, done) FROM THE VIDEO — the only
     reliable ground truth (VHS video time drifts from the hook wall-clock by many
@@ -238,6 +287,10 @@ def detect_turns(full, inp, n, turns, pre_enter):
             i = j
         else:
             i += 1
+    # Fuse wrap-split same-burst groups BEFORE any n-vs-count reasoning below —
+    # otherwise a long wrapped prompt's own typing masquerades as an extra
+    # (wrong) submission and can starve/mis-time real neighbouring turns.
+    groups = _merge_same_burst_groups(groups, inp, fmax)
     # GUIDED selection: some response content (a streaming spinner / answer line)
     # can leak a SECONDARY peak into the tight band that clears half-max, so a turn
     # yields >1 group and the blind count overshoots (measured: a 2-turn demo read
@@ -264,18 +317,31 @@ def detect_turns(full, inp, n, turns, pre_enter):
         raise SystemExit(f"detected {len(groups)} prompt submissions, expected {n}. "
                          f"Tune the input band / thresholds, or the recording differs.")
     cmax = float(full.max()) or 1.0
+    vtot = round(N / FPS, 3)                              # raw video's own end
     out = []
     for k, (a, b) in enumerate(groups):
         submit = round(b / FPS, 3)                       # box fullest -> Enter clears
         typing_start = round(max(0.0, submit - turns[k].get("type_dur", 1.0) - pre_enter), 3)
-        nxt = (groups[k + 1][0] / FPS) if k + 1 < len(groups) else N / FPS
+        nxt = (groups[k + 1][0] / FPS) if k + 1 < len(groups) else vtot
         last = b
         for m in range(b + 1, min(int(nxt * FPS), N)):
             if full[m] - full[m - 1] > 0.04 * cmax:      # content still growing
                 last = m
         done = round(min(nxt - 0.3, last / FPS + 0.5), 3)
-        out.append({"typing_start": typing_start, "submit": submit,
-                    "done": max(round(submit + 0.3, 3), done)})
+        done = max(round(submit + 0.3, 3), done)
+        # The LAST turn's group can run all the way to the raw capture's own
+        # final frame (b == N) when the recording ends before a slow/manual
+        # interaction — e.g. a native menu, like "/theme", still open when the
+        # tape stops — never showing a real Enter-clear to detect. `submit`
+        # then really just means "recording ended here", so the +0.3s floor
+        # above must not be allowed to claim time the raw video doesn't have.
+        # Leave one frame of slack (mirrors BootStrategy's "at end" freeze
+        # source in strategies.py) so a degenerate zero-length tail still has
+        # a real frame to source its freeze from, instead of asking ffmpeg for
+        # a frame at/past the file's reported duration.
+        if k + 1 == len(groups):
+            done = min(done, round(vtot - 1.0 / FPS, 3))
+        out.append({"typing_start": typing_start, "submit": submit, "done": done})
     return out
 
 
