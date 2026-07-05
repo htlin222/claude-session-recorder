@@ -293,6 +293,67 @@ def test_detect_turns_last_turn_done_never_exceeds_raw_video_length():
     assert out[0]["done"] <= round(vtot - 1.0 / da.FPS, 3)
 
 
+def test_detect_turns_raises_on_impossible_submit_before_typing_could_finish():
+    # Layer 1 (issue #23 postmortem): a detected group whose end frame lands
+    # BEFORE the scripted typing (type_dur) + pre_enter beat could possibly have
+    # elapsed is mathematically impossible — no human/script can hit Enter
+    # before finishing typing the prompt. The #23 bug's real shape was a wrap/
+    # spinner artifact getting picked as a turn's "submit" instead of the real
+    # Enter-clear, silently corrupting the ledger; this reproduces the same
+    # CLASS of impossible-timing result (not the exact production numbers) by
+    # constructing a group that clears half-max only 0.32s into the video, far
+    # less than type_dur(2.0)+pre_enter(0.4)=2.4s of scripted typing alone.
+    inp = np.zeros(60)
+    inp[0:4] = 400.0     # group ends at frame 4 -> submit = 4/12.5 = 0.32s
+    full = np.full(60, 100.0)
+    turns = [{"type_dur": 2.0}]
+    try:
+        da.detect_turns(full, inp, n=1, turns=turns, pre_enter=0.4)
+        assert False, "expected SystemExit: submit earlier than scripted typing allows"
+    except SystemExit as e:
+        msg = str(e)
+        assert "turn" in msg and "impossible" in msg
+        assert "0.32" in msg and "2.4" in msg   # names the actual/floor numbers
+
+
+def test_detect_turns_impossible_floor_does_not_trip_legitimate_short_turns():
+    # Companion sanity check: a turn whose submit lands EXACTLY at the floor (no
+    # slack at all — the tightest a legitimate recording could ever be) must NOT
+    # raise. Guards against an off-by-rounding false positive on the new check.
+    inp = np.zeros(60)
+    inp[0:5] = 400.0   # submit = 5/12.5 = 0.4s == type_dur(0.0) + pre_enter(0.4)
+    full = np.full(60, 100.0)
+    turns = [{"type_dur": 0.0}]
+    out = da.detect_turns(full, inp, n=1, turns=turns, pre_enter=0.4)
+    assert out[0]["submit"] == 0.4
+    assert out[0]["typing_start"] == 0.0
+
+
+def test_detect_turns_impossible_floor_applies_uniformly_to_instant_turns():
+    # The floor must not spuriously fire on the existing instant-turn recovery
+    # paths (#20/#21/#23) — the recovered groups' submits sit comfortably above
+    # the (short) instant-turn type_dur+pre_enter floors already, confirmed by
+    # the full existing suite staying green; this is a direct, explicit check
+    # on the boundary case: recovered instant turns still pass through the SAME
+    # per-turn loop/check as normal turns and must not be exempted or broken.
+    N = 140
+    inp = np.zeros(N)
+    inp[10:14] = 400.0
+    inp[30:34] = 390.0
+    inp[60:105] = 400.0
+    full = np.full(N, 100.0)
+    turns = [
+        {"type_dur": 0.5},
+        {"type_dur": 0.5},
+        {"type_dur": 0.4, "instant": True},
+        {"type_dur": 0.6, "instant": True},
+    ]
+    out = da.detect_turns(full, inp, n=4, turns=turns, pre_enter=0.4)
+    for k, t in enumerate(out):
+        floor = round(turns[k]["type_dur"] + 0.4, 3)
+        assert t["submit"] >= floor - 1e-6, (k, t["submit"], floor)
+
+
 def test_raw_segments_boot_then_alternating_soft_hard():
     turns = [{"typing_start": 4.0, "submit": 6.0, "done": 9.0},
              {"typing_start": 12.0, "submit": 13.0, "done": 17.0}]

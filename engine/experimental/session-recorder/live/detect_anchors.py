@@ -321,7 +321,41 @@ def detect_turns(full, inp, n, turns, pre_enter):
     out = []
     for k, (a, b) in enumerate(groups):
         submit = round(b / FPS, 3)                       # box fullest -> Enter clears
-        typing_start = round(max(0.0, submit - turns[k].get("type_dur", 1.0) - pre_enter), 3)
+        type_dur_k = turns[k].get("type_dur", 1.0)
+        # LAYER 1 — deterministic self-consistency floor (issue #23 postmortem):
+        # gen_capture_tape.py's own turn loop is Sleep(PAD) [box empty] -> type
+        # the prompt (type_dur, box fills) -> Sleep(pre_enter) [box full, beat] ->
+        # Enter (submit, box clears). So submit - typing_start MUST equal exactly
+        # type_dur + pre_enter — there is no way to type a prompt and hit Enter in
+        # LESS time than typing it took. (PAD is the pad BEFORE typing_start, i.e.
+        # part of the PRECEDING soft/pre segment, not this hard one, so it does
+        # NOT belong in this particular floor — see raw_segments' docstring.)
+        # `typing_start` below is normally just this identity solved backward
+        # (submit - type_dur - pre_enter); the `max(0.0, ...)` clamp exists only
+        # to keep a turn's estimate from going negative when `submit` sits very
+        # early in the raw video. But if the clamp actually FIRES here, it means
+        # `submit` itself is smaller than the scripted typing alone requires —
+        # i.e. the detected group's end frame is almost certainly wrong (e.g. #23:
+        # a wrap-split/spinner artifact picked instead of the real Enter-clear),
+        # not that the recording is genuinely superhuman. Silently clamping used
+        # to paper over exactly this and corrupt the ledger without a trace; now
+        # it raises immediately, naming the turn and the impossible numbers, so
+        # a future debugging session doesn't have to reverse-engineer it from
+        # video frames.
+        floor = round(type_dur_k + pre_enter, 3)
+        if submit < floor - 1e-6:
+            turn_id = turns[k].get("index", k)
+            raise SystemExit(
+                f"turn {turn_id} (0-based groups index {k}): impossible timing — "
+                f"detected submit at {submit}s, but typing the scripted prompt "
+                f"alone (type_dur={type_dur_k}s) plus the pre-Enter beat "
+                f"(pre_enter={pre_enter}s) requires at least {floor}s. A real "
+                f"submit cannot happen before its own typing could have "
+                f"finished, so the detected group's end frame (raw index {b}) "
+                f"is almost certainly wrong — re-check group selection/merging "
+                f"for this turn instead of trusting this timing."
+            )
+        typing_start = round(max(0.0, submit - type_dur_k - pre_enter), 3)
         nxt = (groups[k + 1][0] / FPS) if k + 1 < len(groups) else vtot
         last = b
         for m in range(b + 1, min(int(nxt * FPS), N)):

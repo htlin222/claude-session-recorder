@@ -23,6 +23,7 @@ RIDES the fixed hard gap [submit, done] and is fit-or-dropped.
   tail soft         -> last turn's outro then the close.
 """
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -302,8 +303,119 @@ def build_ledger(demo, script, anchors, write=True):
     return led
 
 
+# ---------------------------------------------------------------------------
+# LAYER 2 — best-effort cross-check against session-timeline.jsonl (issue #23
+# postmortem; see detect_anchors.py's Layer 1 floor for the sibling check).
+# This is a SEPARATE, independent signal: Layer 1 catches an internally
+# IMPOSSIBLE pixel result; this layer catches an internally CONSISTENT but
+# still WRONG one, by comparing it against the real Claude-Code-hook wall
+# clock (session-timeline.jsonl's UserPromptSubmit/Stop events) for the same
+# recording. It lives HERE (author.py), not in detect_anchors.py, because
+# detect_turns()'s own docstring is explicit that wall-clock time is NOT the
+# primary ground truth for frame positions (VHS video time can drift from it
+# by many seconds during heavy output) — so this must stay a secondary,
+# best-effort sanity check, and author.py (which already knows the demo dir
+# and orchestrates the pipeline — CONTRIBUTING.md's "I/O stays thin" split)
+# is the right layer for optional I/O like this, not the pure-logic
+# detect_anchors module.
+# ---------------------------------------------------------------------------
+TIMELINE_ABS_TOL = 5.0      # seconds — generous floor so short/quick turns'
+                            # ordinary detection noise (the +0.3s/+0.5s scan
+                            # slop already baked into detect_anchors' `done`)
+                            # never trips this.
+TIMELINE_REL_TOL = 0.5      # 50% of the real delta — generous vs. the
+                            # documented "many seconds during heavy output"
+                            # video/wall-clock drift risk, so this only fires
+                            # on a WILD disagreement, not ordinary noise. A
+                            # real capture (a ~110s recording; one turn's real
+                            # Stop-minus-UserPromptSubmit delta was 8.115s)
+                            # measured pixel-vs-wallclock agreement within
+                            # ~0.6s (~7% relative) — comfortably inside this
+                            # tolerance with a lot of headroom to spare.
+
+
+def _load_timeline_rows(path):
+    """Thin I/O: read <demo>/session-timeline.jsonl's LAST session (mirrors
+    panel.py's last_session — duplicated rather than imported, so author.py,
+    which runs UPSTREAM of panel.py in the pipeline, never has to depend on a
+    downstream stage's module). Returns [] on ANY problem — missing file,
+    unreadable, malformed JSON, empty — this is an optional secondary signal,
+    never a hard requirement; absence must degrade silently, not raise."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+    except (OSError, json.JSONDecodeError):
+        return []
+    starts = [i for i, r in enumerate(rows) if r.get("event") == "SessionStart"]
+    return rows[starts[-1]:] if starts else rows
+
+
+def _turn_wallclock_deltas(turns, rows):
+    """PURE: {turn_idx: real Stop-t minus UserPromptSubmit-t} for every turn we
+    can UNAMBIGUOUSLY match — mirrors panel.py's _turn_stop_events matching
+    (by POSITION among non-instant turns only: an instant turn fires
+    UserPromptSubmit but never Stop, so naive index-zipping would shift every
+    later turn onto the wrong pair). Any turn beyond the available rows (fewer
+    hook events than turns — a dropped/retried hook, an older/partial capture,
+    or simply no timeline at all) is silently omitted, never an error:
+    correlation ambiguity here must shrink what Layer 2 can check, not break
+    the pipeline."""
+    ups = [r for r in rows if r.get("event") == "UserPromptSubmit"]
+    stop = [r for r in rows if r.get("event") == "Stop"]
+    real_idx = [i for i, t in enumerate(turns) if not t.get("instant")]
+    out = {}
+    for pos, ti in enumerate(real_idx):
+        if ti >= len(ups) or pos >= len(stop):
+            break
+        u, s = ups[ti].get("t"), stop[pos].get("t")
+        if isinstance(u, (int, float)) and isinstance(s, (int, float)) and s > u:
+            out[ti] = s - u
+    return out
+
+
+def check_timeline_cross_check(det_turns, real_deltas):
+    """LAYER 2's actual comparison (PURE — takes already-extracted data, no
+    file I/O, so it's directly unit-testable without touching disk). For each
+    turn we have a real delta for, compares the PIXEL-detected response window
+    (done - submit — video time from Enter-clear to the last real content
+    growth) against the real wall-clock (Stop - UserPromptSubmit) delta for
+    the SAME turn. These should agree: `submit` is (per Layer 1's own
+    invariant) exactly typing_start + type_dur + pre_enter after Enter, and
+    `done` marks content settling, right around when Stop fires — DONE_HOLD's
+    fixed hold and the next turn's PAD both come AFTER `done`, in the
+    following soft segment (see raw_segments), so neither belongs in this
+    comparison.
+
+    Raises SystemExit ONLY on a WILD mismatch (see TIMELINE_ABS_TOL/REL_TOL
+    above) for a turn we COULD correlate — a turn we couldn't correlate at all
+    is already absent from `real_deltas` (see _turn_wallclock_deltas) and
+    never reaches here. This is deliberately a SEPARATE, independent check
+    from detect_anchors.py's Layer 1: a wrong-but-internally-self-consistent
+    pixel result (e.g. a mis-selected group whose submit/typing_start/done
+    still satisfy Layer 1's own floor) sails through Layer 1 untouched — only
+    an independent real-world signal like the actual model wall-clock time can
+    catch THAT class of error."""
+    for ti, real_delta in real_deltas.items():
+        if ti >= len(det_turns):
+            continue
+        pixel_delta = det_turns[ti]["done"] - det_turns[ti]["submit"]
+        tol = max(TIMELINE_ABS_TOL, TIMELINE_REL_TOL * real_delta)
+        if abs(pixel_delta - real_delta) > tol:
+            raise SystemExit(
+                f"turn {ti}: pixel-detected response window "
+                f"({round(pixel_delta, 3)}s, from detect_anchors) wildly "
+                f"disagrees with the real session-timeline.jsonl "
+                f"Stop-minus-UserPromptSubmit delta ({round(real_delta, 3)}s) "
+                f"for the same turn — outside the +/-{round(tol, 3)}s "
+                f"tolerance. This independently signals the same class of "
+                f"corruption Layer 1 guards against (a wrong pixel-detected "
+                f"submit/done pair), even though it did not trip Layer 1's "
+                f"own deterministic floor. Re-check group selection/merging "
+                f"for this turn."
+            )
+
+
 def main():
-    import json
     import detect_anchors
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -315,6 +427,16 @@ def main():
     with open(os.path.join(demo, "capture.json"), encoding="utf-8") as fh:
         plan = json.load(fh)
     anchors = detect_anchors.detect(demo, args.video, plan)
+    # LAYER 2 (issue #23 postmortem): best-effort cross-check the pixel
+    # detection against session-timeline.jsonl's real hook wall-clock, if this
+    # recording has one. Degrades silently when it's missing, unreadable, or
+    # has no turns we can unambiguously correlate — see _load_timeline_rows /
+    # _turn_wallclock_deltas. Only raises on a turn we COULD correlate whose
+    # real and pixel-detected durations wildly disagree.
+    real_deltas = _turn_wallclock_deltas(
+        plan["turns"], _load_timeline_rows(os.path.join(demo, "session-timeline.jsonl")))
+    if real_deltas:
+        check_timeline_cross_check(anchors["turns"], real_deltas)
     # thread the capture's voice-paced launch beats (if any) into the anchors so
     # build_ledger reuses them instead of re-synthesizing + freeze-extending.
     lp = plan.get("launch", {}) or {}
