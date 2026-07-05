@@ -9,11 +9,11 @@ Set TypingSpeed 45ms
 Env PS1 "❯ "
 Env PROMPT "❯ "
 
+# Everything through entering insert mode is Hidden — the recording opens
+# straight on the (chrome-free, empty) buffer, not the launch command.
 Hide
 Type "clear"
 Enter
-Show
-Sleep 500ms
 
 # Plain nvim — no -u override needed. render.sh points XDG_CONFIG_HOME (and
 # XDG_DATA_HOME/XDG_STATE_HOME) at nvim-xdg/ before calling `vhs`, so this
@@ -27,6 +27,7 @@ Escape
 Sleep 300ms
 Type "i"
 Sleep 400ms
+Show
 
 Type "# Treatment of Hypokalemia"
 Enter
