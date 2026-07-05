@@ -31,10 +31,14 @@ typing (not when it finishes — the sound plays under the typing, not after
 it):
 
 ```
-0.00 Hero.aiff
-1.10 Glass.aiff
-2.14 Tink.aiff
+0.50 Hero.aiff
+2.17 Glass.aiff
+3.71 Tink.aiff
 ```
+
+`nvim-demo.tape` puts a `Sleep 500ms` breath before every line's `Type` (the
+first one right after `Show`) — without it, lines ran into each other with
+no room to read each heading before the next one started.
 
 `nvim-demo.cues` gives each markdown heading level (and list items) their
 own sound right as they start being typed — H1 `Hero.aiff`, H2

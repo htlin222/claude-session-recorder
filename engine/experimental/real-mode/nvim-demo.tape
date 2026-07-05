@@ -28,19 +28,25 @@ Sleep 300ms
 Type "i"
 Sleep 400ms
 Show
+Sleep 500ms
 
 Type "# Treatment of Hypokalemia"
 Enter
 Enter
+Sleep 500ms
 Type "## Mild (3.0-3.5 mEq/L)"
 Enter
+Sleep 500ms
 Type "- Oral KCl 40-60 mEq/day"
 Enter
 Enter
+Sleep 500ms
 Type "## Severe (<3.0 mEq/L)"
 Enter
+Sleep 500ms
 Type "- IV KCl 10-20 mEq/hr"
 Enter
+Sleep 500ms
 Type "- Cardiac monitoring"
 
 Escape
