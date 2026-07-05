@@ -116,6 +116,87 @@ def test_detect_turns_raises_when_instant_shortfall_not_fully_explained():
         pass
 
 
+def test_detect_turns_recovers_partial_merge_within_mixed_settle_run():
+    # Issue #21 repro: 3 consecutive instant-flagged turns with MIXED settle
+    # durations — a native-menu turn ("/theme", NATIVE_MENU_SETTLE=10.0)
+    # immediately followed by two plain instant turns ("/context", "/fast
+    # on", each INSTANT_SETTLE=1.8) back-to-back. #20's recovery treated the
+    # WHOLE 3-turn run as one atomic collapse candidate (either all 3 merge
+    # into 1 group, or none do) — but real pixel behavior is a PARTIAL merge:
+    # /theme's long settle keeps it its own visually-distinct group, while
+    # /context + /fast on's short settle each DO merge into one group. So the
+    # detector sees 4 raw groups for 5 turns (shortfall=1), which the old
+    # "full run of 3 collapses -> shortfall of 2" math can't match — the
+    # fix must instead recover via the same-settle SUB-run (/context +
+    # /fast on only) and leave /theme's own group alone.
+    N = 140
+    inp = np.zeros(N)
+    inp[10:14] = 400.0     # turn 0 (normal) typing peak -> submit @ 1.12
+    inp[30:34] = 390.0     # turn 1 (normal) typing peak -> submit @ 2.72
+    inp[45:49] = 380.0     # turn 2 ("/theme") own distinct peak -> submit @ 3.92
+    # turns 3+4 ("/context" + "/fast on", back-to-back, both INSTANT_SETTLE)
+    # merge into ONE continuous span: no thinking gap to split on. Same
+    # construction as test_detect_turns_recovers_merged_consecutive_instant_group
+    # (merge point at frame 70 = INSTANT_SETTLE(1.8)+pre_enter(0.4)+turn4's
+    # type_dur(0.6) = 2.8s = 35 frames back from the merged span's end (105)).
+    inp[60:105] = 400.0
+    full = np.full(N, 100.0)
+    turns = [
+        {"type_dur": 0.5},
+        {"type_dur": 0.5},
+        {"type_dur": 0.3, "instant": True, "settle": 10.0},    # "/theme"
+        {"type_dur": 0.4, "instant": True, "settle": 1.8},     # "/context"
+        {"type_dur": 0.6, "instant": True, "settle": 1.8},     # "/fast on"
+    ]
+    out = da.detect_turns(full, inp, n=5, turns=turns, pre_enter=0.4)
+    assert len(out) == 5
+    submits = [round(t["submit"], 2) for t in out]
+    assert submits == [1.12, 2.72, 3.92, 5.6, 8.4]
+
+
+def test_detect_turns_recovers_full_collapse_of_same_settle_run_of_three():
+    # Companion to the mixed-settle case above: a run of 3 consecutive
+    # instant turns that ALL share the same (short) settle DOES fully
+    # collapse into one detected group (the #20 case) — the fix must not
+    # regress this: the whole-run collapse attempt should still succeed on
+    # its own, with no need to fall back to sub-run splitting.
+    N = 160
+    inp = np.zeros(N)
+    inp[50:140] = 400.0    # all 3 instant turns merge into ONE continuous span
+    full = np.full(N, 100.0)
+    turns = [
+        {"type_dur": 0.5, "instant": True, "settle": 1.8},
+        {"type_dur": 0.6, "instant": True, "settle": 1.8},
+        {"type_dur": 0.6, "instant": True},
+    ]
+    out = da.detect_turns(full, inp, n=3, turns=turns, pre_enter=0.4)
+    assert len(out) == 3
+    submits = [round(t["submit"], 2) for t in out]
+    assert submits == [5.6, 8.4, 11.2]
+
+
+def test_detect_turns_raises_when_mixed_settle_shortfall_not_explained():
+    # A genuine detection miss inside a mixed-settle instant run must still
+    # raise — neither the original whole-run collapse attempt NOR the new
+    # same-settle sub-run fallback may swallow a shortfall neither of them
+    # can exactly account for.
+    inp = np.zeros(60)
+    inp[10:14] = 400.0   # only ONE raw group detected for all 5 turns
+    full = np.full(60, 100.0)
+    turns = [
+        {"type_dur": 0.5},
+        {"type_dur": 0.5},
+        {"type_dur": 0.3, "instant": True, "settle": 10.0},
+        {"type_dur": 0.4, "instant": True, "settle": 1.8},
+        {"type_dur": 0.6, "instant": True, "settle": 1.8},
+    ]
+    try:
+        da.detect_turns(full, inp, n=5, turns=turns, pre_enter=0.4)
+        assert False, "expected SystemExit: shortfall not fully explained by any partition"
+    except SystemExit:
+        pass
+
+
 def test_raw_segments_boot_then_alternating_soft_hard():
     turns = [{"typing_start": 4.0, "submit": 6.0, "done": 9.0},
              {"typing_start": 12.0, "submit": 13.0, "done": 17.0}]

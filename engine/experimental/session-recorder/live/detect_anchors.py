@@ -122,18 +122,44 @@ def _split_merged_instant_group(group, turns, start, end, pre_enter):
     return [(a[idx], b[idx]) for idx in range(start, end + 1)]
 
 
-def _recover_merged_instant_groups(groups, turns, n, pre_enter):
-    """When len(groups) < n, try to explain the shortfall as one or more
-    detected groups having merged a run of consecutive INSTANT turns (no
-    thinking-gap to split on). Returns a corrected, full-length `groups` list
-    on success, or None if the shortfall isn't (fully) explained this way — a
-    genuine detection miss must still raise, never get silently papered over."""
-    runs = _consecutive_instant_runs(turns)
+def _settle_of(turn):
+    return turn.get("settle", INSTANT_SETTLE)
+
+
+def _split_runs_by_settle(runs, turns):
+    """Split each maximal instant run into maximal SUB-runs of >=2 consecutive
+    turns that share the same recorded `settle` value (issue #21). A run's
+    turns don't all necessarily merge as one block: turns[idx]["settle"] is
+    the sleep AFTER idx's own Enter, i.e. it governs whether idx visually
+    merges with idx+1. Within one flagged-instant run, a boundary where the
+    settle changes (e.g. a NATIVE_MENU_SETTLE turn sitting next to
+    INSTANT_SETTLE turns) is a real dividing line — the long-settle turn is
+    its own visually-distinct submission — so only genuinely same-settle
+    stretches are collapse candidates; a lone turn between two differently-
+    settled neighbors never merges with anything."""
+    sub = []
+    for s, e in runs:
+        i = s
+        while i <= e:
+            j = i
+            while j + 1 <= e and _settle_of(turns[j]) == _settle_of(turns[j + 1]):
+                j += 1
+            if j > i:
+                sub.append((i, j))
+            i = j + 1
+    return sub
+
+
+def _try_recover_with_runs(runs, groups, turns, n, pre_enter):
+    """Attempt the merge-recovery for one candidate list of (start, end)
+    instant-run ranges. Returns a corrected, full-length `groups` list on
+    success, or None if this particular partition doesn't (fully) explain
+    the shortfall."""
     if not runs:
         return None
     collapsed = sum(e - s for s, e in runs)   # groups saved if EVERY run fully merged
     if len(groups) + collapsed != n:
-        return None    # shortfall not exactly explained by instant-run merges
+        return None    # shortfall not exactly explained by these run merges
 
     # Map each turn index -> the detected-group "slot" it should occupy, in
     # temporal order, collapsing every run onto a single slot.
@@ -157,6 +183,33 @@ def _recover_merged_instant_groups(groups, turns, n, pre_enter):
         else:
             new_groups.append(g)
     return new_groups
+
+
+def _recover_merged_instant_groups(groups, turns, n, pre_enter):
+    """When len(groups) < n, try to explain the shortfall as one or more
+    detected groups having merged a run of consecutive INSTANT turns (no
+    thinking-gap to split on). Returns a corrected, full-length `groups` list
+    on success, or None if the shortfall isn't (fully) explained this way — a
+    genuine detection miss must still raise, never get silently papered over.
+
+    Tries the WHOLE maximal instant run as one collapse candidate first (the
+    original #20 recovery, unchanged — a run where every turn shares the same
+    settle, e.g. two plain INSTANT_SETTLE turns, or the existing
+    per-turn-settle test, only ever has this one possible partition anyway).
+    If that doesn't exactly explain the shortfall, falls back to treating
+    only same-settle SUB-runs within the maximal run as collapse candidates
+    (issue #21) — a run can partially merge when settle durations differ
+    within it, e.g. `/theme` (long settle) immediately followed by
+    `/context`+`/fast on` (short settle, back-to-back): only the latter two
+    merge, `/theme` stays its own detected group."""
+    runs = _consecutive_instant_runs(turns)
+    recovered = _try_recover_with_runs(runs, groups, turns, n, pre_enter)
+    if recovered is not None:
+        return recovered
+    sub_runs = _split_runs_by_settle(runs, turns)
+    if sub_runs == runs:
+        return None    # no finer partition possible; already tried it above
+    return _try_recover_with_runs(sub_runs, groups, turns, n, pre_enter)
 
 
 def detect_turns(full, inp, n, turns, pre_enter):
