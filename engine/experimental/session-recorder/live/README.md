@@ -157,7 +157,7 @@ clarification.
 | --- | --- | --- | --- |
 | **auto** (default) | nothing — no selector ever paints | `autoanswer_questions.py` **denies** the tool at PreToolUse and feeds the chosen answer back as the deny *reason*, so `claude` continues as if answered | you just need the recording not to hang |
 | **scripted-visible** | the selector renders; the **VHS tape** navigates `Down×N + Enter` | a `question` beat in the script + `autoanswer_questions.py` in `render` mode | the question is **known** ahead and you want the exact visual |
-| **robust** (`--robust`) | the selector renders; `qmonitor.py` answers it live | `claude` runs inside an invisible tmux; the background monitor reads the live selector and answers **any** question (incl. unscripted + multi-question) | the question is **unknown** / unscripted, or multi-question |
+| **robust** (`--robust`) | the selector renders; `qmonitor.py` answers it live | `claude` runs inside an invisible tmux; the background monitor reads the live selector and answers **any** `AskUserQuestion` (incl. unscripted + multi-question) via the `pending_q.json` signal, **and** polls the pane directly for **native CLI menus** (`/theme`, `/rewind`, `/memory`, `/plugin install`'s scope picker) that render the same selector but never fire that signal, applying the `--answers`/`$VHS_ANSWERS` `"*"` policy | the question is **unknown** / unscripted, multi-question, or a native (non-tool) menu |
 
 Why deny-and-reason for `auto`: Claude Code hooks can't inject a synthetic tool
 *result* at PreToolUse, so denying with the answer in the reason is the only lever
