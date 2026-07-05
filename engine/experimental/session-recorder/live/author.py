@@ -32,7 +32,12 @@ from detect_anchors import raw_segments
 
 VOICE = "zh-TW-HsiaoChenNeural"
 RATE = "+0%"
-INTRO_GAP = 0.3       # silence between a lead voice end and the visual it leads
+INTRO_GAP = 0.8       # silence between a lead voice end and the visual it leads
+                      # (bumped from 0.3s: issue #5 — 0.3s felt hectic at scale,
+                      # too short for a viewer to consolidate a just-heard
+                      # sentence before the next visual event fires; see Mayer's
+                      # segmenting principle / van der Meij software-training
+                      # pacing guidance cited in the issue)
 THINK_GUARD = 0.6     # free gap kept after a ride (think) voice
 
 
