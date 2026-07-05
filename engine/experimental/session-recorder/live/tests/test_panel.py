@@ -28,6 +28,32 @@ def test_keyframe_times_read_from_ledger_not_redetected():
     assert any(k["type"] == "conclusion" and abs(k["t"] - 14.0) < 1e-9 for k in keys)
 
 
+def test_turn_stop_events_skips_instant_turns_without_shifting_the_rest():
+    # regression: a purely client-side turn (e.g. /rename, /fast on) fires
+    # UserPromptSubmit but NEVER fires Stop (no agent turn runs for it). Naively
+    # indexing ups[ti]/stop[ti] by raw turn number would silently pair every
+    # turn AFTER the instant one with the WRONG Stop event (off by one),
+    # corrupting tool-event placement + conclusion text for the rest of the
+    # session. capture.json's turns carry `instant: True` for such turns so
+    # _turn_stop_events can zip ups/stop by position among the REAL turns only.
+    turns = [
+        {"prompt": "/rename demo", "instant": True},
+        {"prompt": "write fizzbuzz"},
+        {"prompt": "add a test"},
+    ]
+    # UserPromptSubmit fires for every turn (even the instant one); Stop fires
+    # only for the two real turns.
+    ups = [{"t": 1.0}, {"t": 5.0}, {"t": 9.0}]
+    stop = [{"t": 6.0, "message": "wrote fizzbuzz"},
+            {"t": 10.0, "message": "added a test"}]
+    pairs = panel._turn_stop_events(turns, ups, stop)
+    assert 0 not in pairs                      # the instant turn has no pair
+    assert pairs[1][0]["t"] == 5.0 and pairs[1][1]["t"] == 6.0
+    assert pairs[1][1]["message"] == "wrote fizzbuzz"
+    assert pairs[2][0]["t"] == 9.0 and pairs[2][1]["t"] == 10.0
+    assert pairs[2][1]["message"] == "added a test"
+
+
 @pytest.mark.skipif(not (HAVE_PIL and HAVE_FONT), reason="needs Pillow + Hiragino font")
 def test_render_panels_are_valid_images(tmp_path):
     from PIL import Image

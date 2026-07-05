@@ -217,3 +217,50 @@ def test_turn_prompt_with_mixed_quotes_round_trips(tmp_path):
                            font_size=26, word_delay=220)
     replayed = _replay_type_lines(tape, "# --- Turn 1 ---", "Enter")
     assert replayed == prompt
+
+
+def test_instant_command_turn_skips_the_stop_sentinel_wait(tmp_path):
+    # regression: a turn whose prompt is handled ENTIRELY client-side (e.g.
+    # /rename, /fast on) never triggers a model turn, so the Stop hook (and
+    # its VHS_TURN_DONE_N sentinel) never fires. Wait+Screen@.../VHS_TURN_DONE_N/
+    # would reliably burn the full turn-timeout for that turn. Such a turn must
+    # get a short fixed Sleep instead, while normal (model-invoking) turns
+    # still get the real sentinel wait.
+    spec = {
+        "launch": {"base": "claude", "flags": []},
+        "turns": [
+            {"prompt": "/rename demo"},
+            {"prompt": "write fizzbuzz"},
+            {"prompt": "/fast on"},
+        ],
+    }
+    tape, plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                          font_size=26, word_delay=220)
+    # turn 1 (/rename demo) — NO sentinel wait for it
+    assert "VHS_TURN_DONE_1" not in tape
+    # turn 2 (write fizzbuzz) — still a real Wait+Screen sentinel
+    assert f"Wait+Screen@120s /VHS_TURN_DONE_2/" in tape
+    # turn 3 (/fast on) — NO sentinel wait for it either
+    assert "VHS_TURN_DONE_3" not in tape
+    # instant turns get a short fixed settle Sleep instead
+    assert f"Sleep {g.INSTANT_SETTLE:.3f}s" in tape
+    # capture.json marks the instant turns distinctly so downstream stages
+    # (e.g. panel.py's UserPromptSubmit/Stop alignment) know not to expect a
+    # Stop-hook JSONL entry for them
+    assert plan["turns"][0]["instant"] is True
+    assert "instant" not in plan["turns"][1]
+    assert plan["turns"][2]["instant"] is True
+    # the real turn still carries its sentinel field
+    assert plan["turns"][1]["sentinel"] == "VHS_TURN_DONE_2"
+    assert "sentinel" not in plan["turns"][0]
+
+
+def test_instant_command_detection_handles_args_and_known_commands(tmp_path):
+    # leading-token match, robust to arguments; only known client-side/instant
+    # commands are treated this way — anything else (including plain text that
+    # merely starts with a slash-like word) still gets the real sentinel wait.
+    for prompt in ["/model opus", "/branch feature-x", "/context", "/usage",
+                   "/clear", "/tui fullscreen", "/effort high", "/fast off"]:
+        assert g._is_instant_command(prompt), prompt
+    for prompt in ["write fizzbuzz", "/explain this code", "/tui split"]:
+        assert not g._is_instant_command(prompt), prompt
