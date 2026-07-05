@@ -39,6 +39,56 @@ def test_detect_turns_raises_when_fewer_than_n():
         pass
 
 
+def test_detect_turns_recovers_merged_consecutive_instant_group():
+    # Issue #18 repro: 2 normal turns, then 2 client-side INSTANT commands
+    # back-to-back ("/context" then "/fast on"), with no real (model-invoking)
+    # turn between them. Instant turns have no thinking-gap, so the intervening
+    # settle+typing period never drops the input band below half-max long
+    # enough to split — the merged span reads as ONE continuous group covering
+    # BOTH turns' typing+Enter, so the naive detector finds 3 groups where 4
+    # turns are expected. The recovery must split it back into 2 using the
+    # KNOWN scripted timing (INSTANT_SETTLE + pre_enter + type_dur), not by
+    # re-detecting pixels (there's no pixel signal left to re-detect from).
+    N = 140
+    inp = np.zeros(N)
+    inp[10:14] = 400.0     # turn 0 (normal) typing peak -> submit @ 14/12.5=1.12
+    inp[30:34] = 390.0     # turn 1 (normal) typing peak -> submit @ 34/12.5=2.72
+    # turns 2+3 (instant, back-to-back) merged into ONE continuous span: no
+    # thinking gap to split on. Constructed so the merge point (frame 70) is
+    # exactly where INSTANT_SETTLE(1.8) + pre_enter(0.4) + turn3's
+    # type_dur(0.6) = 2.8s = 35 frames back from the merged span's end (105).
+    inp[60:105] = 400.0
+    full = np.full(N, 100.0)
+    turns = [
+        {"type_dur": 0.5},
+        {"type_dur": 0.5},
+        {"type_dur": 0.4, "instant": True},   # "/context"
+        {"type_dur": 0.6, "instant": True},   # "/fast on"
+    ]
+    out = da.detect_turns(full, inp, n=4, turns=turns, pre_enter=0.4)
+    assert len(out) == 4
+    submits = [round(t["submit"], 2) for t in out]
+    assert submits == [1.12, 2.72, 5.6, 8.4]
+
+
+def test_detect_turns_raises_when_instant_shortfall_not_fully_explained():
+    # A shortfall that ISN'T fully explained by consecutive-instant merges must
+    # still raise — recovery is only allowed when the math checks out exactly,
+    # never as a blanket excuse to swallow a genuine detection miss. Here only
+    # ONE group is detected for 3 turns (shortfall=2), but the instant run
+    # (turns 1+2) can only ever explain a shortfall of 1.
+    inp = np.zeros(60)
+    inp[10:14] = 400.0
+    full = np.full(60, 100.0)
+    turns = [{"type_dur": 0.5}, {"type_dur": 0.4, "instant": True},
+             {"type_dur": 0.6, "instant": True}]
+    try:
+        da.detect_turns(full, inp, n=3, turns=turns, pre_enter=0.4)
+        assert False, "expected SystemExit: shortfall not fully explained by instant merge"
+    except SystemExit:
+        pass
+
+
 def test_raw_segments_boot_then_alternating_soft_hard():
     turns = [{"typing_start": 4.0, "submit": 6.0, "done": 9.0},
              {"typing_start": 12.0, "submit": 13.0, "done": 17.0}]
