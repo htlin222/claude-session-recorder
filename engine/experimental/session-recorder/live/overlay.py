@@ -20,6 +20,13 @@ from ledger import load
 
 FF = "/opt/homebrew/bin/ffmpeg"
 
+# Quiet keyboard-typing texture, looped under each turn's real typing window
+# (hard-segment raw start -> submit). -24dB so it reads as background flavor,
+# never competing with narration.
+SFX_TYPING = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "assets", "sfx", "keyboard-typing-loop.wav")
+SFX_TYPING_VOLUME = 0.063
+
 # chunk_cues() defaults: a cue's rendered width budget (CJK/fullwidth chars
 # count as 2, ASCII as 1 — see cjk_width) and the floor on how short any one
 # cue's on-screen duration may be, so a fast reader never sees a sub-cue flash
@@ -35,6 +42,23 @@ def srt_ts(s):
     h = int(s // 3600); s -= h * 3600
     m = int(s // 60); s -= m * 60
     return f"{h:02d}:{m:02d}:{int(s):02d},{int(round((s - int(s)) * 1000)):03d}"
+
+
+def _typing_windows(led):
+    """[(out_start, duration), ...] for each hard segment's real typing span
+    (raw start -> submit keypress), mapped into output time via the affine
+    raw->out map documented in docs/ledger-downstream-patterns.md. splice.py
+    has already reconciled meta.segments' "out" times to the actual spliced
+    terminal.mp4 by the time this runs, so these windows are frame-accurate."""
+    windows = []
+    for seg in led.get("meta", {}).get("segments", []):
+        if seg.get("kind") != "hard" or seg.get("submit") is None:
+            continue
+        out_start = seg["out"][0]
+        dur = seg["submit"] - seg["raw"][0]
+        if dur > 0:
+            windows.append((out_start, dur))
+    return windows
 
 
 def _voiced(beats):
@@ -195,8 +219,22 @@ def mux(demo, video="terminal.mp4", out="session.mp4"):
         dms = int(round(max(0.0, onset) * 1000))
         filt.append(f"[{j+1}:a]adelay={dms}|{dms}[s{j}]")
         labs.append(f"[s{j}]")
+
+    # One looped keyboard-typing input per real typing window, trimmed to
+    # that turn's actual typing duration and pulled down to background level
+    # before joining the same amix as the narration.
+    typing = _typing_windows(led) if os.path.exists(SFX_TYPING) else []
+    for k, (onset, dur) in enumerate(typing):
+        idx = len(cues) + 1 + k
+        inputs += ["-stream_loop", "-1", "-i", SFX_TYPING]
+        dms = int(round(max(0.0, onset) * 1000))
+        filt.append(f"[{idx}:a]atrim=0:{dur:.3f},volume={SFX_TYPING_VOLUME},"
+                    f"adelay={dms}|{dms}[t{k}]")
+        labs.append(f"[t{k}]")
+
+    n_mix = len(cues) + len(typing)
     fc = ";".join(filt) + ";" + "".join(labs) + \
-        f"amix=inputs={len(cues)}:normalize=0:dropout_transition=0," \
+        f"amix=inputs={n_mix}:normalize=0:dropout_transition=0," \
         f"apad=whole_dur={vtot:.3f},atrim=end={vtot:.3f}[a]"
     outpath = os.path.join(demo, out)
     subprocess.run([FF, "-y", "-i", vpath, *inputs, "-filter_complex", fc,
