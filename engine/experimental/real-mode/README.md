@@ -21,6 +21,42 @@ cd engine/experimental/real-mode
 ./render.sh nvim-demo.tape   # -> nvim-demo.mp4, nvim-demo-916.mp4
 ```
 
+## Writing content for a new reel
+
+Same shape as `nvim-demo.tape` / `lizard-demo.tape`:
+
+```
+# Title                (H1, exactly one line)
+## Category one        (H2)
+- content              (list — usually one line, comma/、-separated items)
+## Category two         (H2)
+- content
+## Category three       (H2, optional — 2 groups is fine too)
+- content
+```
+
+- **5–7 lines total** (1 H1 + 2–3 H2+list groups) lands the clip around
+  10–12s at the tape's current constants (0.5s lead-in, 0.5s breath before
+  every line, 1.5s tail). More lines or longer lines stretch it
+  proportionally — there's no hard cap, just diminishing pacing past that.
+- **Hard wrap limit** at `FontSize 42` / `Width 1080` (exceeding this
+  wraps mid-line and looks broken): **~42 ASCII chars/line** (incl. the
+  `#`/`##`/`-` prefix), **~21 CJK chars/line** (CJK renders double-width).
+- **Pacing budget** (content only, excluding the prefix) to keep each
+  line's typing to roughly 0.5–0.9s, so a 5–7 line clip stays near 10s:
+
+  | | content length/line | typing time/line |
+  | --- | --- | --- |
+  | ASCII | 12–20 chars (~2–4 words) | ~0.5–0.9s (45ms/char) |
+  | CJK | 4–7 chars | ~0.5–0.9s (135ms/char, 3x ASCII) |
+
+- The wrap limit and the pacing budget are different constraints — content
+  usually fits on-screen with room to spare long before it'd blow the
+  typing-time pacing.
+- `<name>.sfx` must have exactly as many lines as the tape has `Type`
+  lines, same order: H1 → `Hero.aiff`, H2 → `Glass.aiff`, list → `Tink.aiff`
+  (H3 → `Pop.aiff`, reserved — neither demo has used one yet).
+
 ## Optional per-line sound effects: `<name>.sfx`
 
 If `<name>.sfx` exists next to the tape, `render.sh` mixes a macOS system
