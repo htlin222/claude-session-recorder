@@ -35,24 +35,35 @@ Same shape as `nvim-demo.tape` / `lizard-demo.tape`:
 - content
 ```
 
-- **5–7 lines total** (1 H1 + 2–3 H2+list groups) lands the clip around
-  10–12s at the tape's current constants (0.5s lead-in, 0.5s breath before
-  every line, 1.5s tail). More lines or longer lines stretch it
-  proportionally — there's no hard cap, just diminishing pacing past that.
-- **Hard wrap limit** at `FontSize 42` / `Width 1080` (exceeding this
-  wraps mid-line and looks broken): **~42 ASCII chars/line** (incl. the
-  `#`/`##`/`-` prefix), **~21 CJK chars/line** (CJK renders double-width).
-- **Pacing budget** (content only, excluding the prefix) to keep each
-  line's typing to roughly 0.5–0.9s, so a 5–7 line clip stays near 10s:
+Two SEPARATE constraints — don't conflate "keep the clip short" with "keep
+the content short", they're independent dials:
 
-  | | content length/line | typing time/line |
-  | --- | --- | --- |
-  | ASCII | 12–20 chars (~2–4 words) | ~0.5–0.9s (45ms/char) |
-  | CJK | 4–7 chars | ~0.5–0.9s (135ms/char, 3x ASCII) |
+- **Line count is a duration dial, not a content cap.** More lines just
+  makes a longer clip (each one costs its typing time + the 0.5s breath).
+  5–7 lines (1 H1 + 2–3 H2+list groups) lands ~10–12s; nothing stops a
+  20-line outline, it just runs longer.
+- **The real hard limit is the screen, not pacing**: at `FontSize 42` /
+  `Height 1350`, measured line height is ~52px with the first line starting
+  ~68px down — `(1350-68)/52 ≈ 24` lines fit before nvim starts
+  **scrolling**, at which point earlier lines get pushed off the top and
+  disappear from the recording. A blank spacer line (between H2 groups)
+  costs a full line-slot too. Budget **~20 lines max** to leave headroom
+  (e.g. 1 H1 + 6 H2+list groups, or fewer groups with longer list lines).
+- **Per-line wrap limit** at `Width 1080` (exceeding this wraps mid-line
+  and looks broken, separate from the screen's line-count limit above):
+  **~42 ASCII chars/line** (incl. the `#`/`##`/`-` prefix), **~21 CJK
+  chars/line** (CJK renders double-width).
+- **Pacing reference** (content only, excluding the prefix) — use this to
+  estimate a clip's total length, not to cap content: total ≈ 0.5s
+  (lead-in) + 1.5s (tail) + `n_lines`×0.5s (breath) + sum of each line's
+  typing time below. Content around 12–20 ASCII chars or 4–7 CJK chars
+  per line keeps each line's typing to roughly 0.5–0.9s if you *do* want a
+  ~10s clip; go longer per line (or add more lines) for a longer one.
 
-- The wrap limit and the pacing budget are different constraints — content
-  usually fits on-screen with room to spare long before it'd blow the
-  typing-time pacing.
+  | | typing time/line |
+  | --- | --- |
+  | ASCII | ~45ms/char |
+  | CJK | ~135ms/char (3x ASCII) |
 - `<name>.sfx` must have exactly as many lines as the tape has `Type`
   lines, same order: H1 → `Hero.aiff`, H2 → `Glass.aiff`, list → `Tink.aiff`
   (H3 → `Pop.aiff`, reserved — neither demo has used one yet).
