@@ -5,6 +5,9 @@ __pycache__/
 *.pyc
 .DS_Store
 
+# git worktrees used for isolated per-issue branches (superpowers:using-git-worktrees)
+.worktrees/
+
 # ── regenerable scratch ──────────────────────────────────────────
 # clip/intermediate/ is SHARED, disposable build scratch (overwritten every
 # render); clip/dist/ is engine output staging. Both regenerate from the

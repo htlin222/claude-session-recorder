@@ -42,3 +42,40 @@ def test_render_panels_are_valid_images(tmp_path):
         assert p.exists()
         with Image.open(p) as im:
             assert im.size == (panel.PANEL_W, panel.H)
+
+
+@pytest.mark.skipif(not (HAVE_PIL and HAVE_FONT), reason="needs Pillow + Hiragino font")
+def test_wrap_handles_embedded_newlines():
+    """textlength() raises ValueError on any string containing '\\n' — real
+    tool-result text (a `target` or `conclusion`) can legitimately contain
+    embedded newlines, so _wrap must collapse them before measuring."""
+    img, d = panel._new()
+    font = panel.F(panel.MONO, 18)
+
+    multiline = "line one\nline two\nline three"
+    lines = panel._wrap(d, multiline, font, 200)
+    assert lines  # produced *some* wrapped output
+    assert all("\n" not in ln for ln in lines)
+
+    # \r\n (CRLF) must degrade the same way, not leave stray \r behind
+    crlf = "first\r\nsecond\r\nthird"
+    lines = panel._wrap(d, crlf, font, 200)
+    assert lines
+    assert all("\r" not in ln and "\n" not in ln for ln in lines)
+
+    # all-whitespace / all-newline input must not raise and not IndexError;
+    # newlines collapse to spaces (still valid, non-crashing output)
+    whitespace_only = panel._wrap(d, "\n\n\n", font, 200)
+    assert all("\n" not in ln for ln in whitespace_only)
+    assert panel._wrap(d, "", font, 200) == []
+
+
+@pytest.mark.skipif(not (HAVE_PIL and HAVE_FONT), reason="needs Pillow + Hiragino font")
+def test_turn_panel_survives_multiline_target_and_conclusion():
+    """Reproduces the real trigger: a tool's `target` or the turn's
+    `conclusion` — actual Claude tool-result/reply content the script author
+    doesn't control — contains a literal newline."""
+    events = [{"tool": "Write", "target": "a.py\ndef f():\n    pass"}]
+    conclusion = "Done.\nSecond line of the reply.\nThird line."
+    img = panel.turn_panel(1, 2, "請它寫一個函式", events, 1, conclusion)
+    assert img.size == (panel.PANEL_W, panel.H)
