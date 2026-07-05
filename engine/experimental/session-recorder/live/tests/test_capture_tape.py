@@ -264,3 +264,78 @@ def test_instant_command_detection_handles_args_and_known_commands(tmp_path):
         assert g._is_instant_command(prompt), prompt
     for prompt in ["write fizzbuzz", "/explain this code", "/tui split"]:
         assert not g._is_instant_command(prompt), prompt
+
+
+# --- issue #17: native CLI menus (gap between #1c/#16 and #1d/#14) --------
+#
+# /theme, /rewind, /memory and /plugin install DO render an on-screen menu
+# (unlike the no-menu INSTANT_COMMANDS above), but — confirmed via a live
+# tmux probe — selecting an option still fires NO Stop hook event. So the
+# capture tape must ALSO skip Wait+Screen on VHS_TURN_DONE_N for these turns,
+# same as the no-menu instant commands, but the settle Sleep must be long
+# enough for qmonitor's background answer cycle (poll -> dwell -> keystrokes
+# -> confirm poll) to actually finish under --robust/--tmux, where a real
+# qmonitor is driving the menu.
+
+def test_native_menu_command_detection_handles_args_and_known_commands():
+    for prompt in ["/theme", "/theme dark", "/rewind", "/memory",
+                   "/plugin install some-plugin"]:
+        assert g._is_native_menu_command(prompt), prompt
+    # /plugin has OTHER subcommands that don't show the scope-picker menu —
+    # only "install" does; be conservative and don't treat the rest as such.
+    for prompt in ["write fizzbuzz", "/explain this code", "/plugin",
+                   "/plugin list", "/plugin uninstall foo", "/model opus"]:
+        assert not g._is_native_menu_command(prompt), prompt
+
+
+def test_native_menu_turn_skips_the_stop_sentinel_wait_under_robust_tmux(tmp_path):
+    spec = {
+        "launch": {"base": "claude", "flags": []},
+        "turns": [
+            {"prompt": "/theme"},
+            {"prompt": "write fizzbuzz"},
+            {"prompt": "/plugin install foo"},
+        ],
+    }
+    tape, plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                          font_size=26, word_delay=220,
+                          tmux={"socket": "vhsq", "name": "vhsq"})
+    # turn 1 (/theme) — NO sentinel wait; qmonitor answers the menu, but no
+    # Stop hook ever fires for it, so Wait+Screen would just time out.
+    assert "VHS_TURN_DONE_1" not in tape
+    # turn 2 (write fizzbuzz) — still a real Wait+Screen sentinel
+    assert "Wait+Screen@120s /VHS_TURN_DONE_2/" in tape
+    # turn 3 (/plugin install foo) — NO sentinel wait either
+    assert "VHS_TURN_DONE_3" not in tape
+    # under tmux/robust mode, the settle Sleep is the LONGER native-menu one
+    # (long enough for qmonitor's real answer cycle), not the short
+    # no-menu INSTANT_SETTLE.
+    assert f"Sleep {g.NATIVE_MENU_SETTLE:.3f}s" in tape
+    assert g.NATIVE_MENU_SETTLE > g.INSTANT_SETTLE
+    # capture.json marks these turns "instant" too (same flag/shape the
+    # no-menu instant-command path already uses, so downstream stages —
+    # panel.py's UserPromptSubmit/Stop alignment, detect_anchors.py — stay
+    # compatible without needing to learn a second key).
+    assert plan["turns"][0]["instant"] is True
+    assert "instant" not in plan["turns"][1]
+    assert plan["turns"][2]["instant"] is True
+    assert "sentinel" not in plan["turns"][0]
+    assert plan["turns"][1]["sentinel"] == "VHS_TURN_DONE_2"
+
+
+def test_native_menu_turn_uses_short_settle_without_tmux(tmp_path):
+    # STANDARD (non-robust) mode has no qmonitor running at all, so a /theme
+    # turn's menu never gets navigated regardless of how long we sleep — the
+    # capture is already broken for this scenario. But the Stop hook still
+    # never fires either way, so we must not hang the capture wait on a
+    # sentinel that will never print. Since there's no answer cycle to wait
+    # out here, use the short no-menu INSTANT_SETTLE rather than the longer
+    # robust-mode NATIVE_MENU_SETTLE.
+    spec = {"launch": {"base": "claude", "flags": []},
+            "turns": [{"prompt": "/theme"}]}
+    tape, plan = g.render(spec, demo=str(tmp_path), width=1200, height=1080,
+                          font_size=26, word_delay=220, tmux=None)
+    assert "VHS_TURN_DONE_1" not in tape
+    assert f"Sleep {g.INSTANT_SETTLE:.3f}s" in tape
+    assert f"Sleep {g.NATIVE_MENU_SETTLE:.3f}s" not in tape
+    assert plan["turns"][0]["instant"] is True
