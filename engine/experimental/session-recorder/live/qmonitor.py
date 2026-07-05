@@ -6,7 +6,17 @@ writes pending_q.json when a question fires. This monitor polls that signal, pol
 the tmux pane until the selector is live (qparse), reconciles the target answer
 against the ACTUAL on-screen option order (by label — robust to reordering), and
 `tmux send-keys` the navigation + Enter. Pure decision in decide_keystrokes; the
-run() loop is the I/O."""
+run() loop is the I/O.
+
+NATIVE menus (issue #1 bug 3): `/theme`, `/rewind`, `/memory`, `/plugin install`'s
+scope picker render the SAME selector footer/list widget as AskUserQuestion, but
+are handled CLIENT-SIDE — no tool call, so no PreToolUse hook ever fires and
+pending_q.json is NEVER written for them. Gating run() entirely on that file's
+existence made those menus invisible to the monitor. run() now ALSO polls the
+pane directly whenever no signal is pending; when a selector is showing with no
+matching signal, it's a native menu, and poll_action/decide_native_keystrokes
+answer it generically via the same "*" catch-all policy autoanswer_questions.py
+uses (else the first/already-highlighted option)."""
 import argparse
 import json
 import os
@@ -15,7 +25,9 @@ import subprocess
 import sys
 import time
 
+import autoanswer_questions
 import qnav
+import qparse
 
 
 def _as_questions(pending):
@@ -114,6 +126,41 @@ def decide_keystrokes(pending, parsed):
     return qnav.keys_to_select(idx, parsed.get("highlight", 0))
 
 
+def _native_menu_index(options, answers):
+    """The 0-based option index to pick for a NATIVE menu (no pending_q.json —
+    so no `header`/`question` text is known, only the on-screen `options`
+    labels). Reuses autoanswer_questions.target_index_for by wrapping the
+    labels as an anonymous question, so only the catch-all `answers["*"]`
+    override can ever match (there's no header/question key to look up) and
+    the override semantics (int index or label substring) stay in ONE place.
+    Falls back to option 0 when there are no options or no override."""
+    if not options:
+        return 0
+    question = {"options": [{"label": label} for label in options]}
+    return autoanswer_questions.target_index_for(question, answers)
+
+
+def decide_native_keystrokes(parsed, answers):
+    """The keys to answer a NATIVE menu (one with no AskUserQuestion signal)
+    on the CURRENT screen: pick `_native_menu_index` and navigate there from
+    the current highlight, exactly like decide_keystrokes does for a signalled
+    question. [] if no selector is showing."""
+    if not parsed.get("showing"):
+        return []
+    idx = _native_menu_index(parsed.get("options", []), answers)
+    return qnav.keys_to_select(idx, parsed.get("highlight", 0))
+
+
+def poll_action(pane_text, answers):
+    """Pure per-iteration decision for run()'s passive-detection path: parse
+    the CURRENT pane text and, if a selector is showing (with no
+    pending_q.json behind it — the caller only reaches here when the signal
+    file is absent), return the keys to answer it generically. [] means idle
+    (no selector showing); the caller should sleep and re-poll."""
+    parsed = qparse.parse_selector(pane_text)
+    return decide_native_keystrokes(parsed, answers)
+
+
 def _tmux_argv(socket, *args):
     """The tmux argv, prepending `-L <socket>` when `socket` is set. Pure: the
     tmux mode uses a DEDICATED socket (`-L vhsq`) so it never collides with the
@@ -182,25 +229,41 @@ def _answer_one(session, pending, max_wait, poll, key_gap, socket=None,
 
 
 def run(session, signal_dir, socket=None, max_wait=60.0, poll=0.3, key_gap=0.8,
-        read_dwell=2.5):
+        read_dwell=2.5, answers=None):
     """Watch `signal_dir` for pending_q.json; for each, drive the on-screen
-    selector. Stop when `<signal_dir>/.qmonitor_stop` appears. Never spins
-    forever: every wait is bounded by max_wait."""
+    AskUserQuestion selector. Stop when `<signal_dir>/.qmonitor_stop` appears.
+    Never spins forever: every wait is bounded by max_wait.
+
+    Passive detection (issue #1 bug 3): when pending_q.json is ABSENT, this
+    doesn't just sleep — it ALSO captures the pane and checks (via
+    poll_action) for a native-menu-style selector that no PreToolUse hook ever
+    signalled (/theme, /rewind, /memory, /plugin install's scope picker). When
+    one is showing, it answers generically per `answers` (the "*" catch-all,
+    else the current highlight) so those menus can never block the loop
+    forever waiting on a signal file that will never be written."""
+    answers = answers or {}
     pending_path = os.path.join(signal_dir, "pending_q.json")
     stop_path = os.path.join(signal_dir, ".qmonitor_stop")
     while not os.path.exists(stop_path):
-        if not os.path.exists(pending_path):
-            time.sleep(poll)
-            continue
-        try:
-            with open(pending_path) as f:
-                pending = json.load(f)
-        except Exception as e:  # malformed/partial write — drop it and continue
-            _log(f"bad pending_q.json ({e}); removing")
+        if os.path.exists(pending_path):
+            try:
+                with open(pending_path) as f:
+                    pending = json.load(f)
+            except Exception as e:  # malformed/partial write — drop and continue
+                _log(f"bad pending_q.json ({e}); removing")
+                _safe_remove(pending_path)
+                continue
+            _answer_one(session, pending, max_wait, poll, key_gap, socket, read_dwell)
             _safe_remove(pending_path)
             continue
-        _answer_one(session, pending, max_wait, poll, key_gap, socket, read_dwell)
-        _safe_remove(pending_path)
+        keys = poll_action(capture(session, socket), answers)
+        if not keys:
+            time.sleep(poll)
+            continue
+        _log(f"native menu detected (no pending_q.json signal) -> {keys}")
+        for key in keys:
+            send(session, key, socket)
+            time.sleep(key_gap)
 
 
 def _safe_remove(path):
@@ -224,9 +287,22 @@ def main():
                          "(lets the viewer read it on the recording)")
     ap.add_argument("--key-gap", type=float, default=0.8,
                     help="seconds between keystrokes (highlight move is visible)")
+    ap.add_argument("--answers", default=None, metavar="JSON",
+                    help="answer policy for NATIVE menus that never produce a "
+                         "pending_q.json signal (only the catch-all \"*\" key "
+                         "can match — there's no header/question text to look "
+                         "up), e.g. '{\"*\":0}'. Falls back to $VHS_ANSWERS, "
+                         "then {} (keeps the current highlight).")
     args = ap.parse_args()
+    answers_json = args.answers if args.answers is not None else os.environ.get("VHS_ANSWERS", "{}")
+    try:
+        answers = json.loads(answers_json or "{}")
+    except Exception:
+        answers = {}
+    if not isinstance(answers, dict):
+        answers = {}
     run(args.session, args.signal_dir, socket=args.socket, max_wait=args.max_wait,
-        key_gap=args.key_gap, read_dwell=args.read_dwell)
+        key_gap=args.key_gap, read_dwell=args.read_dwell, answers=answers)
 
 
 if __name__ == "__main__":

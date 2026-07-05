@@ -164,13 +164,19 @@ def run_robust(demo: Path, script: Path, args) -> None:
     _run(["bash", LIVE / "claude_sandbox.sh", demo], stage="sandbox")
     # Phase 0a' — status-off tmux config so the rendered pane shows NO tmux chrome.
     (demo / "tmux.conf").write_text(TMUX_CONF)
-    # Background safety net: qmonitor drives the on-screen selector for ANY question.
+    # Background safety net: qmonitor drives the on-screen selector for ANY
+    # question — both a signalled AskUserQuestion AND a native CLI menu
+    # (/theme, /rewind, /memory, /plugin install's scope picker) that never
+    # writes pending_q.json. Same default policy as _capture_env's VHS_ANSWERS
+    # below: {"*":0} = first option for unknown/native questions.
     qlog_path = demo / "qmonitor.log"
     qlog = open(qlog_path, "w")
+    answers_json = args.answers if args.answers is not None else '{"*":0}'
     monitor = subprocess.Popen(
         [PY, str(LIVE / "qmonitor.py"),
          "--session", TMUX_NAME, "--socket", TMUX_SOCKET,
-         "--signal-dir", str(demo), "--max-wait", "90"],
+         "--signal-dir", str(demo), "--max-wait", "90",
+         "--answers", answers_json],
         stdout=qlog, stderr=subprocess.STDOUT,
     )
     print(f"-- qmonitor: background pid {monitor.pid} -> {qlog_path}", flush=True)

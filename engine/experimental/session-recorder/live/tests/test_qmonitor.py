@@ -1,3 +1,5 @@
+import threading
+
 import qmonitor
 
 
@@ -78,3 +80,108 @@ def test_multiselect_keys_toggle_then_submit():
 def test_plan_groups_single_multiselect_question():
     pending = {"questions": [{"multiSelect": True, "target_indices": [0, 2], "options": ["a", "b", "c", "d"]}]}
     assert qmonitor.plan_groups(pending) == [["Space", "Down", "Down", "Space", "Right", "Enter"]]
+
+
+# ── native CLI menus (issue #1 bug 3): /theme, /rewind, /memory, `/plugin
+# install`'s scope picker render the SAME selector footer/list widget as
+# AskUserQuestion but are handled CLIENT-SIDE — no PreToolUse hook ever fires
+# for them, so pending_q.json is NEVER written. qmonitor must detect and answer
+# these by polling the pane directly, not by waiting on the signal file. ─────
+
+_NATIVE_MENU_PANE = (
+    "❯ 1. Dark mode\n"
+    "  2. Light mode\n"
+    "  3. Dark mode (colorblind-friendly)\n"
+    "\n"
+    "Enter to select · Up/down to navigate · Esc to cancel\n"
+)
+
+_NATIVE_MENU_PANE_HIGHLIGHT_1 = (
+    "  1. Dark mode\n"
+    "❯ 2. Light mode\n"
+    "  3. Dark mode (colorblind-friendly)\n"
+    "\n"
+    "Enter to select · Up/down to navigate · Esc to cancel\n"
+)
+
+
+def test_native_menu_index_defaults_to_first_option():
+    assert qmonitor._native_menu_index(["Dark mode", "Light mode"], {}) == 0
+
+
+def test_native_menu_index_honors_star_override_by_index():
+    assert qmonitor._native_menu_index(["Dark mode", "Light mode"], {"*": 1}) == 1
+
+
+def test_native_menu_index_honors_star_override_by_label_substring():
+    assert qmonitor._native_menu_index(["Dark mode", "Light mode"], {"*": "light"}) == 1
+
+
+def test_native_menu_index_no_options_is_zero():
+    assert qmonitor._native_menu_index([], {}) == 0
+
+
+def test_decide_native_keystrokes_no_selector_showing():
+    assert qmonitor.decide_native_keystrokes({"showing": False}, {}) == []
+
+
+def test_decide_native_keystrokes_defaults_to_current_highlight():
+    parsed = {"showing": True, "options": ["Dark mode", "Light mode"], "highlight": 0}
+    assert qmonitor.decide_native_keystrokes(parsed, {}) == ["Enter"]
+
+
+def test_decide_native_keystrokes_navigates_to_star_override():
+    parsed = {"showing": True, "options": ["Dark mode", "Light mode"], "highlight": 1}
+    assert qmonitor.decide_native_keystrokes(parsed, {"*": 0}) == ["Up", "Enter"]
+
+
+def test_poll_action_idle_when_no_selector_showing():
+    assert qmonitor.poll_action("$ some ordinary shell prompt\n", {}) == []
+
+
+def test_poll_action_detects_native_menu_with_no_signal_file():
+    # This is the exact blind spot: a native menu is on screen, no
+    # pending_q.json exists (and never will), yet the pure decision logic
+    # still produces keys to send.
+    assert qmonitor.poll_action(_NATIVE_MENU_PANE, {}) == ["Enter"]
+
+
+def test_poll_action_honors_answers_policy_for_native_menu():
+    assert qmonitor.poll_action(_NATIVE_MENU_PANE_HIGHLIGHT_1, {"*": 0}) == ["Up", "Enter"]
+
+
+def test_run_answers_native_menu_that_never_produces_a_pending_signal(tmp_path, monkeypatch):
+    """Regression for issue #1 bug 3: --robust/qmonitor previously ONLY reacted
+    to pending_q.json (written exclusively by the AskUserQuestion PreToolUse
+    hook). A NATIVE CLI menu (/theme, /rewind, /memory, /plugin install's scope
+    picker) never goes through that tool, so the file never appears and the OLD
+    run() loop would poll os.path.exists forever without ever inspecting the
+    pane — a genuine hang, not a regex mismatch.
+
+    pending_q.json is deliberately NEVER created in this test (real tmp_path,
+    nothing writes it) to prove run() answers from the pane alone. Guarded by a
+    bounded thread-join so a pre-fix hang fails fast instead of blocking the
+    suite."""
+    sent = []
+
+    def fake_capture(session, socket=None):
+        return _NATIVE_MENU_PANE
+
+    def fake_send(session, key, socket=None):
+        sent.append(key)
+        (tmp_path / ".qmonitor_stop").touch()  # tear down right after answering
+
+    monkeypatch.setattr(qmonitor, "capture", fake_capture)
+    monkeypatch.setattr(qmonitor, "send", fake_send)
+
+    t = threading.Thread(
+        target=qmonitor.run,
+        args=("sess", str(tmp_path)),
+        kwargs={"poll": 0.01, "key_gap": 0},
+        daemon=True,
+    )
+    t.start()
+    t.join(timeout=2.0)
+
+    assert not t.is_alive(), "run() never inspected the pane for a native menu (blind spot)"
+    assert sent == ["Enter"]
