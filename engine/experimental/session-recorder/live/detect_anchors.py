@@ -102,13 +102,19 @@ def _split_merged_instant_group(group, turns, start, end, pre_enter):
     frame — it's the last real pixel event before the recording goes idle.
     Earlier turns' submit frames are derived by walking BACKWARD from it: the
     real-time gap between two consecutive instant turns' Enters is exactly
-    INSTANT_SETTLE (settle after the earlier Enter) + pre_enter (beat before
-    the later Enter) + the later turn's type_dur (its typing duration) — all
-    deterministic, scripted quantities."""
+    that turn's settle Sleep (after the earlier Enter) + pre_enter (beat
+    before the later Enter) + the later turn's type_dur (its typing
+    duration) — all deterministic, scripted quantities. The settle duration
+    isn't always INSTANT_SETTLE: a NATIVE-MENU instant turn (e.g. "/theme",
+    see gen_capture_tape.py's NATIVE_MENU_COMMANDS) shares the exact same
+    `instant` flag/shape but can use a longer settle (NATIVE_MENU_SETTLE under
+    --tmux) — gen_capture_tape.py records the ACTUAL settle it used per-turn
+    in `turns[i]["settle"]`, so read that instead of assuming one constant."""
     merged_a, merged_b = group
     b = {end: merged_b}
     for idx in range(end - 1, start - 1, -1):
-        gap = INSTANT_SETTLE + pre_enter + turns[idx + 1].get("type_dur", 1.0)
+        settle = turns[idx].get("settle", INSTANT_SETTLE)
+        gap = settle + pre_enter + turns[idx + 1].get("type_dur", 1.0)
         b[idx] = b[idx + 1] - round(gap * FPS)
     a = {start: merged_a}
     for idx in range(start + 1, end + 1):
