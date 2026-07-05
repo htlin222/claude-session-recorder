@@ -21,40 +21,61 @@ cd engine/experimental/real-mode
 ./render.sh nvim-demo.tape   # -> nvim-demo.mp4, nvim-demo-916.mp4
 ```
 
-## Optional per-line sound effects: `<name>.cues`
+## Optional per-line sound effects: `<name>.sfx`
 
-If `<name>.cues` exists next to the tape, `render.sh` mixes a macOS system
-sound (from `/System/Library/Sounds/`) onto the output at each listed
-timestamp — no cues file, silent output, unchanged from before. One
-`<seconds> <Sound.aiff>` pair per line, timed to when that line STARTS
-typing (not when it finishes — the sound plays under the typing, not after
-it):
+If `<name>.sfx` exists next to the tape, `render.sh` mixes a macOS system
+sound (from `/System/Library/Sounds/`) onto the output for each line — no
+sfx file, silent output, unchanged from before. It's just an ordered list
+of sound names, one per typed line, no timestamps:
 
 ```
-0.50 Hero.aiff
-2.17 Glass.aiff
-3.71 Tink.aiff
+Hero.aiff
+Glass.aiff
+Tink.aiff
 ```
+
+`gen_onsets.py` computes each line's actual onset — no manual calibration.
+**Why not hardcoded timestamps** (the first approach, and why it got
+replaced): VHS re-renders the *same* tape with measurably different total
+duration run to run (observed 8.96s vs 10.36s for `lizard-demo.tape`,
+unchanged) — a timestamp picked off one render is already wrong on the
+next. Worse, CJK characters render roughly 3x slower per character than
+ASCII in this typing model (not documented anywhere — found empirically by
+watching a CJK demo drift ~1.5s behind an English-calibrated timeline).
+Hand-probing frames to find each line's start (`ffmpeg -ss T -update 1
+-vframes 1 probe.png`, nudge `T`, repeat) works but doesn't scale and has
+to be redone per render.
+
+Instead, `gen_onsets.py <tape> <content.mp4>`:
+1. reads the tape's own `Sleep` constants — the lead-in right after `Show`,
+   the breath before every `Type`, the tail after the closing `Escape` —
+   which ARE exact wall-clock waits, unlike typing speed;
+2. weights each line by character count (CJK chars at 3x, matching the
+   empirical ratio above);
+3. takes the ACTUAL measured duration of whatever `vhs` just rendered
+   (`ffprobe` on `$out`, post-render — not predicted), subtracts the fixed
+   Sleep time, and divides what's left across lines proportional to weight.
+
+So onsets are re-derived from this specific render's real timing every time
+`render.sh` runs, rather than assuming a fixed model — self-correcting for
+the run-to-run drift instead of fighting it. It's not frame-accurate (own
+measured error: within roughly a second on a ~10s clip with 6-7 lines) —
+good enough for a background ding under fast typing, not a hard sync
+target. A genuinely frame-accurate version would need to read the rendered
+video's own pixels (the way `session-recorder`'s `detect_anchors.py` does
+for real capture) — real implementation work, not done here; this module
+stays in "close enough, always automatic" territory on purpose.
+
+`nvim-demo.sfx` / `lizard-demo.sfx` give each markdown heading level its own
+sound as it starts — H1 `Hero.aiff`, H2 `Glass.aiff`, H3 `Pop.aiff`
+(reserved, neither demo happens to use an H3), list items `Tink.aiff`.
 
 `nvim-demo.tape` puts a `Sleep 500ms` breath before every line's `Type` (the
 first one right after `Show`) — without it, lines ran into each other with
-no room to read each heading before the next one started.
-
-`nvim-demo.cues` gives each markdown heading level (and list items) their
-own sound right as they start being typed — H1 `Hero.aiff`, H2
-`Glass.aiff`, H3 `Pop.aiff` (reserved, unused by this particular demo),
-list items `Tink.aiff`.
-
-Timestamps were found empirically, not read off the tape's `Set
-TypingSpeed` — with no `Sleep` between a line's `Type` and its `Enter`,
-VHS's own frame quantization makes exact keystroke arithmetic unreliable
-past ~100ms. Line N's start is line N-1's completion (the gap between
-`Enter` and the next `Type` is near zero), so the workflow: render once
-with no cues file, then binary-search a handful of `ffmpeg -i out.mp4 -ss T
--update 1 -vframes 1 probe.png` frame grabs around each expected line-
-completion time until each line reads as
-just-finished, and use those `T`s. Good enough for a sound that's flavor,
-not a hard sync target — re-derive the same way if the script text changes.
+no room to read each heading before the next one started. `gen_onsets.py`
+assumes this exact convention (lead-in, then one uniform breath before
+every line, then a tail) — a tape structured differently needs the parser
+adjusted, not just new numbers.
 
 ## nvim demos: an isolated XDG config, not `-u <initfile>`
 

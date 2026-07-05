@@ -27,24 +27,31 @@ out916="${base}-916.${out##*.}"
 pad="pad=${width}:${height916}:0:(${height916}-ih)/2:color=0x1e1e2e"
 FF=/opt/homebrew/bin/ffmpeg
 
-# Optional sidecar "<tape-basename>.cues": one "<seconds> <Sound.aiff>" pair
-# per line, each a macOS system sound (looked up under
-# /System/Library/Sounds/) played once at that timestamp — e.g. a distinct
-# ding per markdown heading level as it's typed. Absent file = silent output
-# (today's default for any tape without one).
-cues="${base}.cues"
-if [ -f "$cues" ]; then
+# Optional sidecar "<tape-basename>.sfx": one macOS system sound name (under
+# /System/Library/Sounds/) per line, in typing order -- e.g. a distinct ding
+# per markdown heading level. No timestamps to hand-derive: gen_onsets.py
+# computes each line's onset from the tape's own Sleep constants + character
+# weights + the ACTUAL measured duration of this render, so it self-corrects
+# for VHS's run-to-run timing drift instead of assuming a fixed typing rate
+# (see gen_onsets.py's docstring). Absent file = silent output, unchanged.
+sfx="${base}.sfx"
+if [ -f "$sfx" ]; then
   vtot=$(/opt/homebrew/bin/ffprobe -v error -show_entries format=duration -of csv=p=0 "$out")
-  inputs=(); filt=""; labs=""; n=0
-  while read -r t sound; do
-    [ -z "${t:-}" ] && continue
-    inputs+=(-i "/System/Library/Sounds/${sound}")
-    ms=$(awk -v t="$t" 'BEGIN{printf "%d", t*1000}')
-    filt+="[$((n+1)):a]adelay=${ms}|${ms}[s${n}];"
-    labs+="[s${n}]"
-    n=$((n+1))
-  done < "$cues"
-  filt+="${labs}amix=inputs=${n}:normalize=0:dropout_transition=0,apad=whole_dur=${vtot},atrim=end=${vtot}[a]"
+  sounds=(); while IFS= read -r line; do sounds+=("$line"); done < "$sfx"
+  onsets=(); while IFS= read -r line; do onsets+=("$line"); done \
+    < <(python3 "$(dirname "$0")/gen_onsets.py" "$tape" "$out")
+  if [ "${#sounds[@]}" -ne "${#onsets[@]}" ]; then
+    echo "render.sh: $sfx has ${#sounds[@]} sounds but $tape has ${#onsets[@]} typed lines" >&2
+    exit 1
+  fi
+  inputs=(); filt=""; labs=""
+  for i in "${!sounds[@]}"; do
+    inputs+=(-i "/System/Library/Sounds/${sounds[$i]}")
+    ms=$(awk -v t="${onsets[$i]}" 'BEGIN{printf "%d", t*1000}')
+    filt+="[$((i+1)):a]adelay=${ms}|${ms}[s${i}];"
+    labs+="[s${i}]"
+  done
+  filt+="${labs}amix=inputs=${#sounds[@]}:normalize=0:dropout_transition=0,apad=whole_dur=${vtot},atrim=end=${vtot}[a]"
   "$FF" -y -i "$out" "${inputs[@]}" -filter_complex "[0:v]${pad}[v];${filt}" \
     -map "[v]" -map "[a]" -c:v libx264 -pix_fmt yuv420p -crf 20 \
     -c:a aac -b:a 160k "$out916"
