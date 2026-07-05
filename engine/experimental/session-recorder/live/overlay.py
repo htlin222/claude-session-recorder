@@ -61,6 +61,30 @@ def _typing_windows(led):
     return windows
 
 
+def _boot_typing_windows(beats):
+    """[(onset, duration), ...] for each captured launch beat's own
+    narrate-then-reveal span (the base token + each flag) — the zsh command
+    line visibly grows by one token right as the beat's voice ends, so its
+    voice window doubles as that token's "typing" span. Excludes the post-
+    Enter outro beat: same "launch_flag" kind (see author.py), but it narrates
+    while Claude is already loading, not while anything is being typed —
+    distinguished the same way panel.py's _is_flag_beat does, by clip name
+    (open_intro/open_flag* vs open_outro)."""
+    windows = []
+    for b in beats:
+        if b.get("kind") != "launch_flag" or b.get("drop"):
+            continue
+        v = b.get("voice")
+        if not v or not v.get("clip"):
+            continue
+        if "outro" in os.path.basename(v["clip"]):
+            continue
+        dur = v["end"] - v["start"]
+        if dur > 0:
+            windows.append((v["start"], dur))
+    return windows
+
+
 def _voiced(beats):
     """The non-dropped, voiced beats ordered by their voice onset — the muxable
     cues. Everything downstream (srt + amix) walks this same ordered list so the
@@ -220,10 +244,12 @@ def mux(demo, video="terminal.mp4", out="session.mp4"):
         filt.append(f"[{j+1}:a]adelay={dms}|{dms}[s{j}]")
         labs.append(f"[s{j}]")
 
-    # One looped keyboard-typing input per real typing window, trimmed to
-    # that turn's actual typing duration and pulled down to background level
-    # before joining the same amix as the narration.
-    typing = _typing_windows(led) if os.path.exists(SFX_TYPING) else []
+    # One looped keyboard-typing input per real typing window — each turn's
+    # prompt typing plus the boot's own command-line typing — trimmed to that
+    # window's actual duration and pulled down to background level before
+    # joining the same amix as the narration.
+    typing = (_typing_windows(led) + _boot_typing_windows(led["beats"])
+              if os.path.exists(SFX_TYPING) else [])
     for k, (onset, dur) in enumerate(typing):
         idx = len(cues) + 1 + k
         inputs += ["-stream_loop", "-1", "-i", SFX_TYPING]
