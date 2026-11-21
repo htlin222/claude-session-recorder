@@ -167,6 +167,10 @@ def turn_panel(num, total, prompt, events, revealed, conclusion=None):
 
 
 def _wrap(d, text, font, maxw):
+    # PIL's textlength() raises ValueError on multiline text (e.g. a tool
+    # target/conclusion string that embeds a real newline, like a diff
+    # preview or multi-line file content) — flatten to one line first.
+    text = " ".join(text.splitlines())
     out, cur = [], ""
     for ch in text:
         if d.textlength(cur + ch, font=font) > maxw and cur:
@@ -223,13 +227,20 @@ def keyframe_times(led):
     for b in launch_beats:
         if _is_flag_beat(b):
             revealed += 1
-        keys.append({"t": b["panel"]["switch_at"], "type": "launch", "reveal": revealed})
+        keys.append(
+            {"t": b["panel"]["switch_at"], "type": "launch", "reveal": revealed}
+        )
 
     # per-turn header: the turn's intro beat panel.switch_at.
     for b in beats:
         if b["kind"] == "intro" and not b.get("drop"):
-            keys.append({"t": b["panel"]["switch_at"], "type": "turn_header",
-                         "turn": b["turn_idx"]})
+            keys.append(
+                {
+                    "t": b["panel"]["switch_at"],
+                    "type": "turn_header",
+                    "turn": b["turn_idx"],
+                }
+            )
 
     # conclusion: each turn's hard segment out-end (= done in output time).
     for s in segs:
@@ -245,8 +256,11 @@ def _tool_events(led, rows, turn_idx, ups_wall, stop_wall):
     timeline; the OUTPUT time of each event is its wall-clock FRACTION of the turn
     mapped into the turn's HARD output window — both window edges from the ledger.
     """
-    hard = next(s for s in led["meta"]["segments"]
-                if s.get("kind") == "hard" and s["turn_idx"] == turn_idx)
+    hard = next(
+        s
+        for s in led["meta"]["segments"]
+        if s.get("kind") == "hard" and s["turn_idx"] == turn_idx
+    )
     submit_out = hard["out"][0] + (hard.get("submit", hard["raw"][0]) - hard["raw"][0])
     done_out = hard["out"][1]
     span_w = max(0.1, stop_wall - ups_wall)
@@ -260,8 +274,15 @@ def _tool_events(led, rows, turn_idx, ups_wall, stop_wall):
         tool = detail.split(" ", 1)[0]
         target = detail.split(" ", 1)[1] if " " in detail else ""
         target = os.path.basename(target) if "/" in target else target[:36]
-        out.append({"t": round(ev_out, 3), "type": "tool", "turn": turn_idx,
-                    "tool": tool, "target": target})
+        out.append(
+            {
+                "t": round(ev_out, 3),
+                "type": "tool",
+                "turn": turn_idx,
+                "tool": tool,
+                "target": target,
+            }
+        )
     return out
 
 
@@ -296,8 +317,9 @@ def main():
     keys.sort(key=lambda k: k["t"])
 
     # conclusion text: the turn's Stop message (first line), else the ledger outro.
-    outro_txt = {b["turn_idx"]: b.get("text", "")
-                 for b in led["beats"] if b["kind"] == "outro"}
+    outro_txt = {
+        b["turn_idx"]: b.get("text", "") for b in led["beats"] if b["kind"] == "outro"
+    }
 
     def conclusion_text(ti):
         m = stop[ti].get("message", "") if ti < len(stop) else ""
@@ -316,8 +338,14 @@ def main():
             if k["type"] == "tool":
                 turn_events[ti].append({"tool": k["tool"], "target": k["target"]})
             concl = conclusion_text(ti) if k["type"] == "conclusion" else None
-            img = turn_panel(ti + 1, len(turns), turns[ti]["prompt"],
-                             turn_events[ti], len(turn_events[ti]), concl)
+            img = turn_panel(
+                ti + 1,
+                len(turns),
+                turns[ti]["prompt"],
+                turn_events[ti],
+                len(turn_events[ti]),
+                concl,
+            )
         p = os.path.join(pdir, f"p{idx:03d}.png")
         img.save(p)
         segs.append((p, k["t"]))
@@ -355,8 +383,8 @@ def main():
             "-vsync",
             "cfr",
             "-t",
-            f"{vtot:.3f}",          # the concat's trailing-repeat frame overshoots
-            panel_mp4,              # under CFR; cap the panel at the ledger total
+            f"{vtot:.3f}",  # the concat's trailing-repeat frame overshoots
+            panel_mp4,  # under CFR; cap the panel at the ledger total
         ],
         check=True,
         capture_output=True,
@@ -394,7 +422,7 @@ def main():
             "-b:a",
             "192k",
             "-t",
-            f"{vtot:.3f}",          # end exactly with the terminal+audio (no dead tail)
+            f"{vtot:.3f}",  # end exactly with the terminal+audio (no dead tail)
             out,
         ],
         check=True,

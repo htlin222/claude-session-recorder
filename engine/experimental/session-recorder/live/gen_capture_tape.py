@@ -30,6 +30,7 @@ Example:
   python3 gen_capture_tape.py --demo /tmp/sess --script script.example.json
   cd /tmp/sess && vhs session.tape   # -> terminal_raw.mp4 + session-timeline.jsonl
 """
+
 import argparse
 import json
 import os
@@ -38,36 +39,109 @@ import subprocess
 import qnav
 
 THEMES = {"dark": "Catppuccin Mocha", "light": "Catppuccin Latte"}
-PAD = 0.4          # fixed tiny soft pad around each action (no voice sizing)
-DONE_HOLD = 3.0    # hold after each turn's Stop sentinel so the SETTLED result is
-                   # captured stable (else detection/tail-freeze land on the still-
-                   # running frame and the ending freezes mid-execution)
-PRELUDE = 2.0      # Sleep before the launch typing (shell prompt settles)
-PRE_ENTER = 0.4    # beat after typing finishes, before Enter
-LBREATH = 0.5      # breath after each voice-paced launch token (== ledger BREATH)
-QSEE = 1.5         # dwell on the rendered AskUserQuestion selector (viewer reads it)
-QSTEP = 0.5        # beat between selector navigation keys (highlight move is visible)
+
+
+def vhs_type(text: str) -> list[str]:
+    """Build one or more `Type "..."` / `Type '...'` tape lines for arbitrary
+    text, returned in typing order (VHS just appends each Type's contents at
+    the cursor, so multiple lines type as one continuous run).
+
+    VHS's tape grammar has no backslash-escape for quotes inside a Type
+    string, so a literal `"` breaks a `Type "..."` line and a literal `'`
+    breaks a `Type '...'` line. When text contains only one of the two quote
+    characters we wrap the whole thing in the other. When it contains BOTH
+    (e.g. a shell-style single-quoted JSON blob with embedded double quotes,
+    as in an --mcp-config flag), we split at each point the required
+    delimiter would conflict with what's already been committed for the
+    current chunk, and emit one Type line per chunk.
+    """
+    chunks = []
+    cur = ""
+    forced = None  # delimiter char this chunk is currently committed to
+    for ch in text:
+        needed = "'" if ch == '"' else ('"' if ch == "'" else None)
+        if needed is not None and forced is not None and forced != needed:
+            chunks.append((cur, forced))
+            cur = ""
+            forced = needed
+        elif needed is not None:
+            forced = needed
+        cur += ch
+    if cur:
+        chunks.append((cur, forced))
+    return [
+        f"Type {delim}{chunk}{delim}"
+        for chunk, delim in ((c, d or '"') for c, d in chunks)
+    ]
+
+
+PAD = 0.4  # fixed tiny soft pad around each action (no voice sizing)
+DONE_HOLD = 3.0  # hold after each turn's Stop sentinel so the SETTLED result is
+# captured stable (else detection/tail-freeze land on the still-
+# running frame and the ending freezes mid-execution)
+PRELUDE = 2.0  # Sleep before the launch typing (shell prompt settles)
+PRE_ENTER = 0.4  # beat after typing finishes, before Enter
+LBREATH = 0.5  # breath after each voice-paced launch token (== ledger BREATH)
+QSEE = 1.5  # dwell on the rendered AskUserQuestion selector (viewer reads it)
+QSTEP = 0.5  # beat between selector navigation keys (highlight move is visible)
 
 VOICE = "zh-TW-HsiaoChenNeural"
 RATE = "+0%"
 
 
-def synth(text, out_mp3):           # I/O boundary (mirrors author.synth)
-    subprocess.run(["edge-tts", "--voice", VOICE, "--rate", RATE,
-                    "--text", text, "--write-media", out_mp3],
-                   check=True, capture_output=True)
+def synth(text, out_mp3):  # I/O boundary (mirrors author.synth)
+    subprocess.run(
+        [
+            "edge-tts",
+            "--voice",
+            VOICE,
+            "--rate",
+            RATE,
+            "--text",
+            text,
+            "--write-media",
+            out_mp3,
+        ],
+        check=True,
+        capture_output=True,
+    )
     return _dur(out_mp3)
 
 
 def _dur(path):
-    return float(subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "csv=p=0", path], capture_output=True, text=True).stdout or 0)
+    return float(
+        subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "csv=p=0",
+                path,
+            ],
+            capture_output=True,
+            text=True,
+        ).stdout
+        or 0
+    )
 
 
-def render(spec, demo, width, height, font_size, word_delay,
-           startup_to=60, turn_to=120, theme="Catppuccin Mocha",
-           launch_voice=None, launch_outro=None, tmux=None):
+def render(
+    spec,
+    demo,
+    width,
+    height,
+    font_size,
+    word_delay,
+    startup_to=60,
+    turn_to=120,
+    theme="Catppuccin Mocha",
+    launch_voice=None,
+    launch_outro=None,
+    tmux=None,
+):
     """Pure: build (tape_str, plan) from spec. Writes NOTHING to disk.
 
     `launch_voice` (optional): a list of `{token, text, mp3, dur}` for the
@@ -121,6 +195,15 @@ def render(spec, demo, width, height, font_size, word_delay,
     a('Env PS1 "❯ "')
     a('Env PROMPT "❯ "')
     a(f'Env ZDOTDIR "{os.path.join(cfg, "zdotdir")}"')
+    # Prompt suggestions (grey ghost text in the input box, offered after a
+    # turn whose reply reads like an invitation, e.g. "say the word if you'd
+    # like me to...") have been observed to desync the next turn's scripted
+    # typing — the tape types the real prompt but the ghost suggestion seems
+    # to eat the submission, so Wait Screen VHS_TURN_DONE_N times out with
+    # the terminal sitting idle on the suggestion. Disable them entirely so
+    # captures aren't at the mercy of what wording the model happens to close
+    # a turn with.
+    a('Env CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION "false"')
     # When a turn expects an AskUserQuestion, the tape must navigate a LIVE selector,
     # so claude runs in render-mode (the hook lets the selector paint instead of
     # auto-answering). Default stays "auto" (hang-proof) when no turn asks.
@@ -137,8 +220,7 @@ def render(spec, demo, width, height, font_size, word_delay,
         sock, name = tmux["socket"], tmux["name"]
         conf = os.path.join(os.path.abspath(demo), "tmux.conf")
         a("Hide")
-        a(f'Type "tmux -L {sock} -f {conf} new-session -A -s {name} '
-          "'exec $SHELL'\"")
+        a(f"Type \"tmux -L {sock} -f {conf} new-session -A -s {name} 'exec $SHELL'\"")
         a("Enter")
         a("Sleep 800ms")
         a("Show")
@@ -158,24 +240,33 @@ def render(spec, demo, width, height, font_size, word_delay,
             at = round(cur, 3)
             note = "narrate intro" if bi == 0 else "narrate flag, token not shown yet"
             a(f"Sleep {d:.3f}s   # {note}")
-            a(f'Type "{tok}"' if bi == 0 else f'Type " {tok}"')
+            L.extend(vhs_type(tok) if bi == 0 else vhs_type(f" {tok}"))
             a(f"Sleep {LBREATH:.3f}s   # breath after the token appears")
-            beats_plan.append({"token": tok, "text": lv.get("text", ""),
-                               "mp3": lv["mp3"], "dur": round(d, 3), "at": at})
+            beats_plan.append(
+                {
+                    "token": tok,
+                    "text": lv.get("text", ""),
+                    "mp3": lv["mp3"],
+                    "dur": round(d, 3),
+                    "at": at,
+                }
+            )
             cur += d + LBREATH
         a("Enter")
         a(f"Wait+Screen@{startup_to}s /shift\\+tab|for shortcuts/")
         launch_plan["beats"] = beats_plan
         if launch_outro:
-            launch_plan["outro"] = {"text": launch_outro.get("text", ""),
-                                    "mp3": launch_outro["mp3"],
-                                    "dur": round(float(launch_outro["dur"]), 3),
-                                    "at": round(cur, 3)}    # rides boot from Enter
+            launch_plan["outro"] = {
+                "text": launch_outro.get("text", ""),
+                "mp3": launch_outro["mp3"],
+                "dur": round(float(launch_outro["dur"]), 3),
+                "at": round(cur, 3),
+            }  # rides boot from Enter
     else:
         # LEGACY fixed-PAD launch: typed token-by-token with a fixed PAD between
         # tokens. No narration (back-compat / unit tests).
         for ti, tok in enumerate(tokens):
-            a(f'Type "{tok}"' if ti == 0 else f'Type " {tok}"')
+            L.extend(vhs_type(tok) if ti == 0 else vhs_type(f" {tok}"))
             a(f"Sleep {PAD:.3f}s   # fixed pad after token")
         a("Enter")
         a(f"Wait+Screen@{startup_to}s /shift\\+tab|for shortcuts/")
@@ -183,7 +274,9 @@ def render(spec, demo, width, height, font_size, word_delay,
 
     plan = {
         "launch": launch_plan,
-        "pre_enter": PRE_ENTER, "prelude": PRELUDE, "pad": PAD,
+        "pre_enter": PRE_ENTER,
+        "prelude": PRELUDE,
+        "pad": PAD,
         "turns": [],
     }
     for i, t in enumerate(turns, 1):
@@ -192,12 +285,14 @@ def render(spec, demo, width, height, font_size, word_delay,
         a(f"# --- Turn {i} ---")
         a(f"Sleep {PAD:.3f}s   # pre-prompt pad")
         for w, word in enumerate(words):
-            a(f'Type "{word}"' if w == 0 else f'Type " {word}"')
+            L.extend(vhs_type(word) if w == 0 else vhs_type(f" {word}"))
             a(f"Sleep {word_delay}ms")
         a(f"Sleep {PRE_ENTER:.3f}s          # beat before Enter")
         a("Enter")
         turn_plan = {
-            "index": i, "prompt": t["prompt"], "sentinel": f"VHS_TURN_DONE_{i}",
+            "index": i,
+            "prompt": t["prompt"],
+            "sentinel": f"VHS_TURN_DONE_{i}",
             "type_dur": type_dur,
         }
         question = t.get("question")
@@ -209,8 +304,10 @@ def render(spec, demo, width, height, font_size, word_delay,
             # the sentinel wait. qnav.FOOTER_RE is a VHS-SAFE substring (`to
             # navigate`): VHS's tape parser cannot handle a literal `/` (no `\/`
             # escape) nor the Unicode arrows `↑↓` inside a Wait+Screen regex.
-            a(f"Wait+Screen@{turn_to}s /{qnav.FOOTER_RE}/   "
-              "# AskUserQuestion selector footer appeared")
+            a(
+                f"Wait+Screen@{turn_to}s /{qnav.FOOTER_RE}/   "
+                "# AskUserQuestion selector footer appeared"
+            )
             a(f"Sleep {QSEE:.3f}s   # dwell on the question (viewer reads it)")
             keys = qnav.keys_to_select(question["answer_index"], 0)
             for ki, key in enumerate(keys):
@@ -239,23 +336,35 @@ def render(spec, demo, width, height, font_size, word_delay,
 
 def main():
     ap = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--demo", required=True, help="sandbox dir (from claude_sandbox.sh)")
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--demo", required=True, help="sandbox dir (from claude_sandbox.sh)"
+    )
     ap.add_argument("--script", required=True, help="script.json (prompt per turn)")
-    ap.add_argument("-o", "--output", default=None, help="tape path (default <demo>/session.tape)")
+    ap.add_argument(
+        "-o", "--output", default=None, help="tape path (default <demo>/session.tape)"
+    )
     ap.add_argument("--theme", choices=THEMES, default="dark")
     ap.add_argument("--font-size", type=int, default=27)
     ap.add_argument("--width", type=int, default=1600)
     ap.add_argument("--height", type=int, default=900)
-    ap.add_argument("--word-delay", type=int, default=220, help="ms between prompt words")
+    ap.add_argument(
+        "--word-delay", type=int, default=220, help="ms between prompt words"
+    )
     ap.add_argument("--startup-timeout", type=int, default=60)
     ap.add_argument("--turn-timeout", type=int, default=120)
-    ap.add_argument("--tmux", action="store_true",
-                    help="film the session INSIDE a dedicated-socket tmux "
-                         "(a bg qmonitor.py answers any on-screen question)")
-    ap.add_argument("--tmux-socket", default="vhsq",
-                    help="dedicated tmux socket/session name for --tmux")
+    ap.add_argument(
+        "--tmux",
+        action="store_true",
+        help="film the session INSIDE a dedicated-socket tmux "
+        "(a bg qmonitor.py answers any on-screen question)",
+    )
+    ap.add_argument(
+        "--tmux-socket",
+        default="vhsq",
+        help="dedicated tmux socket/session name for --tmux",
+    )
     args = ap.parse_args()
     spec = json.load(open(args.script, encoding="utf-8"))
     tape_path = args.output or os.path.join(args.demo, "session.tape")
@@ -273,28 +382,57 @@ def main():
         intro = lc.get("intro", "")
         bm = os.path.join(voice_dir, "open_intro.mp3")
         bd = synth(intro, bm) if intro else 0.0
-        launch_voice.append({"token": base, "text": intro,
-                             "mp3": os.path.relpath(bm, args.demo), "dur": round(bd, 3)})
+        launch_voice.append(
+            {
+                "token": base,
+                "text": intro,
+                "mp3": os.path.relpath(bm, args.demo),
+                "dur": round(bd, 3),
+            }
+        )
         for k, f in enumerate(lc.get("flags", [])):
             say, arg = f.get("say", ""), f["arg"]
             m = os.path.join(voice_dir, f"open_flag{k}.mp3")
             d = synth(say, m) if say else 0.0
-            launch_voice.append({"token": arg, "text": say,
-                                 "mp3": os.path.relpath(m, args.demo), "dur": round(d, 3)})
+            launch_voice.append(
+                {
+                    "token": arg,
+                    "text": say,
+                    "mp3": os.path.relpath(m, args.demo),
+                    "dur": round(d, 3),
+                }
+            )
         outro_txt = lc.get("outro", "")
         if outro_txt:
             om = os.path.join(voice_dir, "open_outro.mp3")
-            launch_outro = {"text": outro_txt, "mp3": os.path.relpath(om, args.demo),
-                            "dur": round(synth(outro_txt, om), 3)}
+            launch_outro = {
+                "text": outro_txt,
+                "mp3": os.path.relpath(om, args.demo),
+                "dur": round(synth(outro_txt, om), 3),
+            }
 
     tmux = {"socket": args.tmux_socket, "name": args.tmux_socket} if args.tmux else None
-    tape, plan = render(spec, args.demo, args.width, args.height, args.font_size,
-                        args.word_delay, args.startup_timeout, args.turn_timeout,
-                        THEMES[args.theme], launch_voice=launch_voice,
-                        launch_outro=launch_outro, tmux=tmux)
+    tape, plan = render(
+        spec,
+        args.demo,
+        args.width,
+        args.height,
+        args.font_size,
+        args.word_delay,
+        args.startup_timeout,
+        args.turn_timeout,
+        THEMES[args.theme],
+        launch_voice=launch_voice,
+        launch_outro=launch_outro,
+        tmux=tmux,
+    )
     open(tape_path, "w").write(tape)
-    json.dump(plan, open(os.path.join(args.demo, "capture.json"), "w"),
-              ensure_ascii=False, indent=2)
+    json.dump(
+        plan,
+        open(os.path.join(args.demo, "capture.json"), "w"),
+        ensure_ascii=False,
+        indent=2,
+    )
     print(f"wrote {tape_path}  ({len(spec['turns'])} turns)")
     print(f"wrote {os.path.join(args.demo, 'capture.json')}")
 
