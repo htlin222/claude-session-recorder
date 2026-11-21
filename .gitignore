@@ -64,3 +64,6 @@ dist/
 
 # the README hero clip is an intentional committed asset
 !engine/experimental/session-recorder/live/assets/*.mp4
+
+# Home cleanup: generated files and machine-local state
+.claude/settings.local.json
